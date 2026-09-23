@@ -7,7 +7,8 @@ import uuid
 from pathlib import Path
 
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
+from fastapi import (APIRouter, Depends, HTTPException, Query, Request, Response,
+                     UploadFile)
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -15,9 +16,9 @@ from sqlalchemy.orm import Session, selectinload
 from waferai.auth import current_user, get_session, require_engineer
 from waferai.decision import Thresholds
 from waferai.heatmap import top_class
-from waferai.image_adapter import UnsupportedImage, image_to_wafer_map
+from waferai.image_adapter import UnsupportedImage, encode_png, image_to_wafer_map
 from waferai.models import ReviewResult, Setting, THRESHOLDS_KEY, User, WaferResult
-from waferai.preprocess import validate_map
+from waferai.preprocess import to_rgb, validate_map
 from waferai.schemas import (ApproveRequest, ReviewRequest, WaferDetail,
                               WaferSummary)
 
@@ -184,6 +185,22 @@ def approve(wafer_id: str, body: ApproveRequest | None = None,
     _record_review(session, wafer, ordered[rank - 1][0], user.employee_id,
                    body.memo if body else '')
     return _detail(session, wafer_id)
+
+
+@router.get('/records/{wafer_id}/thumbnail')
+def thumbnail(wafer_id: str, _: User = Depends(current_user),
+              session: Session = Depends(get_session)):
+    """웨이퍼 맵 자체를 학습과 같은 색으로 그린 PNG.
+
+    목록 화면용이다. 히트맵을 목록에 쓰면 카드 수만큼 역전파가 돌아 지연 생성
+    설계가 무너진다. 여기는 모델을 전혀 건드리지 않고 LUT 와 리사이즈만 한다.
+    """
+    wafer = session.get(WaferResult, wafer_id)
+    if wafer is None:
+        raise HTTPException(404, '기록이 없습니다')
+    rgb = to_rgb(validate_map(np.asarray(wafer.wafer_map, dtype=np.uint8)))
+    return Response(encode_png(rgb), media_type='image/png',
+                    headers={'Cache-Control': 'private, max-age=3600'})
 
 
 @router.get('/records/{wafer_id}/heatmap')

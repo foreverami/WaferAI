@@ -3,8 +3,9 @@
 WM-811K 로 학습한 CoAtNet-0 9클래스 분류기를 웹 서비스로 배포하는 프로젝트.
 Colab 학습 코드는 `training_reference.py` 에 보존돼 있다.
 
-현재 **Phase 3** 까지 완료: 공용 전처리 · 추론 백엔드 · 판정 로직 · 인증/권한 ·
-SQLAlchemy 모델 · Alembic 마이그레이션 · Grad-CAM · 검토 워크플로. React 화면은 Phase 4.
+현재 **Phase 4** 까지 완료: 공용 전처리 · 추론 백엔드 · 판정 로직 · 인증/권한 ·
+SQLAlchemy 모델 · Alembic 마이그레이션 · Grad-CAM · 검토 워크플로 · React 화면.
+Docker Compose 배포는 Phase 5.
 
 ## 설치
 
@@ -16,14 +17,20 @@ cp .env.example .env          # 값을 채운다
 ## 실행
 
 ```sh
-python3 -m unittest discover -s tests -v       # 테스트 121개
+python3 -m unittest discover -s tests -v       # 테스트 126개
 python3 -m alembic upgrade head                # 스키마 생성/갱신
 python3 -m scripts.create_user --employee-id 202104346 --name 이름 \
     --email me@example.com --role admin        # 첫 관리자 (비밀번호는 실행 중 입력)
 python3 -m uvicorn waferai.server:app --host 127.0.0.1 --port 8000
 ```
 
-브라우저에서 http://127.0.0.1:8000 을 연다.
+프론트엔드는 따로 띄운다. 개발 중에는 Vite(5173)와 FastAPI(8000)가 다른 포트라
+쿠키가 오가지 않으므로, Vite 프록시가 같은 출처처럼 보이게 한다.
+
+```sh
+npm --prefix frontend install
+npm --prefix frontend run dev        # http://127.0.0.1:5173
+```
 
 ```sh
 python3 -m scripts.export_onnx                 # .pth → .onnx (동등성 검증 포함)
@@ -98,6 +105,31 @@ CoAtNet 마지막 스테이지 출력이 **(1, 768, 7, 7) 4D NCHW** 로 실측�
 | Edge-Ring | 0.880 | 가장자리 |
 
 결함 기하와 순서가 정확히 일치한다.
+
+## 화면 (frontend/)
+
+Vite + React 19 + React Router 7 + Tailwind 4. UIUX 문서 §5 의 컬러 토큰을 그대로
+쓴다(타이포 스케일은 Figma 시안 기준 10.5px 라 실제 화면에서 너무 작아, 위계는 두고
+읽을 수 있는 크기로 올렸다).
+
+로그인 → 메인 대시보드 → 헤더 아래 탭으로 다른 화면 이동.
+
+| 경로 | 화면 | 최소 등급 |
+|---|---|---|
+| `/login` | 로그인 | — |
+| `/` | 대시보드 (KPI + 웨이퍼 카드) | engineer |
+| `/review` | 리뷰 대기열 | engineer |
+| `/settings` | 판정 임계값 | senior_engineer |
+
+상세 팝업은 원본 / 히트맵 / 겹쳐보기 토글과 1순위 승인 · 2순위 수정 · 수동 라벨링
+세 경로를 담는다.
+
+> **목록에는 `/thumbnail`, 상세에만 `/heatmap`.** 카드마다 히트맵을 부르면 목록을
+> 한 번 열 때 카드 수만큼 역전파가 돌아 지연 생성 설계가 무너진다. 썸네일은 모델을
+> 건드리지 않고 LUT 와 리사이즈만 한다.
+
+라우터 가드는 편의지 방어가 아니다. 실제 차단은 서버가 하며, 등급이 모자란 사용자가
+주소를 직접 쳐도 API 가 403 을 낸다.
 
 ## 데이터베이스
 

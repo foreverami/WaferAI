@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+/* UIUX 문서 §5 의 컬러 토큰.
+   타이포 스케일(본문 10.5px)은 Figma 시안 기준이라 실제 화면에서는 너무 작다.
+   위계는 그대로 두되 읽을 수 있는 크기로 올렸다. */
+@theme {
+  --color-brand: #7c3aed;       /* Primary Purple — 버튼·강조·Rule-Base */
+  --color-pass: #22c55e;        /* Success Green — AI 자동 통과 */
+  --color-warn: #f59e0b;        /* Warning Amber — 임계값 근접 */
+  --color-danger: #ef4444;      /* Danger Red — 검토 필요·결함 */
+  --color-surface: #0f172a;     /* Dark BG */
+  --color-panel: #1e293b;       /* Card BG */
+  --color-line: #334155;
+  --color-ink: #f8fafc;         /* Text Primary */
+  --color-muted: #94a3b8;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-family: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 웨이퍼 맵은 픽셀 하나가 다이 하나다. 브라우저가 부드럽게 보간하면
+   결함 패턴이 뭉개지므로 확대해도 각지게 둔다. */
+.wafer-image {
+  image-rendering: pixelated;
+}

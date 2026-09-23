@@ -60,6 +60,45 @@ class HeatmapEndpointTests(ApiTestCase):
             self.client.get(f'/api/records/{self.wafer_id}/heatmap').status_code, 401)
 
 
+class ThumbnailTests(ApiTestCase):
+    """목록용 썸네일. 모델을 건드리지 않아야 한다."""
+
+    def setUp(self):
+        super().setUp()
+        self.login(ENGINEER)
+        self.wafer_id = self.upload().json()['wafer_id']
+
+    def test_returns_png(self):
+        response = self.client.get(f'/api/records/{self.wafer_id}/thumbnail')
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.headers['content-type'], 'image/png')
+        self.assertTrue(response.content.startswith(b'\x89PNG'))
+
+    def test_does_not_load_the_torch_model(self):
+        """목록에 히트맵을 쓰면 카드 수만큼 역전파가 돌아 지연 생성이 무너진다.
+
+        썸네일은 LUT 와 리사이즈만 하므로 PyTorch 를 올려서는 안 된다.
+        """
+        service = self.client.app.state.heatmaps
+        service.release()
+        self.client.get(f'/api/records/{self.wafer_id}/thumbnail')
+        self.assertFalse(service.loaded, '썸네일이 PyTorch 를 올렸습니다')
+
+    def test_differs_from_heatmap(self):
+        thumbnail = self.client.get(f'/api/records/{self.wafer_id}/thumbnail').content
+        heatmap = self.client.get(f'/api/records/{self.wafer_id}/heatmap').content
+        self.assertNotEqual(thumbnail, heatmap)
+
+    def test_missing_record_returns_404(self):
+        self.assertEqual(
+            self.client.get('/api/records/does-not-exist/thumbnail').status_code, 404)
+
+    def test_requires_login(self):
+        self.logout()
+        self.assertEqual(
+            self.client.get(f'/api/records/{self.wafer_id}/thumbnail').status_code, 401)
+
+
 class LazyLoadingTests(ApiTestCase):
     def test_torch_model_is_not_loaded_until_a_heatmap_is_requested(self):
         """아무도 히트맵을 열지 않으면 PyTorch 102MB 를 올리지 않아야 한다."""
