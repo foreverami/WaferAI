@@ -1,142 +1,199 @@
-import json
-import tempfile
 import unittest
-from pathlib import Path
 
 import numpy as np
-from fastapi.testclient import TestClient
+from conftest import (ADMIN, ENGINEER, SENIOR, SYNTHETIC_MAP, ApiTestCase, wafer_png)
 
-from waferai.decision import Thresholds
-from waferai.image_adapter import encode_png, render_wafer_map
-from waferai.server import MAX_UPLOAD_BYTES, create_app
-
-ROOT = Path(__file__).resolve().parent.parent
-CHECKPOINT = ROOT / 'models/best_coatnet_model_optimized.pth'
-
-SYNTHETIC_MAP = b'[[0,1,0],[1,2,1],[0,1,0]]'
+from waferai.image_adapter import encode_png
+from waferai.models import WaferResult
+from waferai.routers.wafer_routes import MAX_UPLOAD_BYTES
 
 
-def wafer_png(size: int = 224) -> bytes:
-    """학습과 같은 색으로 렌더링한 웨이퍼 맵 PNG."""
-    yy, xx = np.mgrid[0:45, 0:48]
-    radius = np.sqrt(((yy - 22) / 22.5) ** 2 + ((xx - 23.5) / 24) ** 2)
-    wafer_map = np.where(radius <= 1.0, 1, 0).astype(np.uint8)
-    wafer_map[(radius < 0.35) & (wafer_map == 1)] = 2
-    return encode_png(render_wafer_map(wafer_map, size))
+class AuthorizationGateTests(ApiTestCase):
+    def test_every_data_endpoint_requires_login(self):
+        """인증 없이 데이터에 닿을 수 있는 구멍이 없어야 한다."""
+        self.assertEqual(self.upload().status_code, 401)
+        self.assertEqual(self.client.get('/api/records').status_code, 401)
+        self.assertEqual(self.client.get('/api/records/anything').status_code, 401)
+        self.assertEqual(self.client.get('/api/status').status_code, 401)
+        self.assertEqual(
+            self.client.post('/api/records/x/review', json={'label': 'Center'}).status_code,
+            401)
+
+    def test_health_and_home_stay_public(self):
+        """로드밸런서·Docker 헬스체크가 로그인 없이 불러야 한다."""
+        self.assertEqual(self.client.get('/healthz').json()['status'], 'ok')
+        self.assertEqual(self.client.get('/').status_code, 200)
 
 
-@unittest.skipUnless(CHECKPOINT.is_file(), '체크포인트가 없습니다')
-class IntegrationTest(unittest.TestCase):
-    def test_real_model_review_and_persistence(self):
-        with tempfile.TemporaryDirectory() as folder:
-            db_path = Path(folder) / 'test.sqlite3'
-            with TestClient(create_app(db_path=db_path)) as client:
-                self.assertEqual(client.get('/').status_code, 200)
-                self.assertEqual(client.get('/healthz').json()['status'], 'ok')
-
-                status = client.get('/api/status').json()
-                self.assertTrue(status['model_ready'])
-                self.assertEqual(len(status['classes']), 9)
-                self.assertIn('.png', status['accepted_formats'])
-                self.assertEqual(status['thresholds']['confidence'], 0.80)
-
-                invalid = client.post('/api/predict',
-                                      files={'file': ('bad.json', b'[[3]]', 'application/json')})
-                self.assertEqual(invalid.status_code, 422)
-
-                result = client.post(
-                    '/api/predict',
-                    files={'file': ('synthetic.json', SYNTHETIC_MAP, 'application/json')})
-                self.assertEqual(result.status_code, 200, result.text)
-                data = result.json()
-                record_id = data['id']
-                self.assertEqual(len(data['result']['probabilities']), 9)
-                self.assertIn('decision_path', data['result'])
-                self.assertEqual(data['input_type'], 'array')
-
-                self.assertEqual(
-                    client.post(f'/api/records/{record_id}/review',
-                                json={'label': 'invalid'}).status_code, 422)
-
-                review = client.post(f'/api/records/{record_id}/review',
-                                     json={'label': 'Center', 'note': 'synthetic integration test'})
-                self.assertEqual(review.status_code, 200, review.text)
-                self.assertEqual(review.json()['reviews'][0]['label'], 'Center')
-                self.assertEqual(review.json()['result'], data['result'])
-
-                client.post(f'/api/records/{record_id}/review',
-                            json={'label': 'Donut', 'note': 'second review'})
-
-            with TestClient(create_app(db_path=db_path)) as client:
-                detail = client.get(f'/api/records/{record_id}').json()
-                self.assertEqual(len(detail['reviews']), 2)
-                self.assertEqual(client.get('/api/records').json()[0]['review']['label'], 'Donut')
-
-
-@unittest.skipUnless(CHECKPOINT.is_file(), '체크포인트가 없습니다')
-class ImageUploadTest(unittest.TestCase):
+class PredictionTests(ApiTestCase):
     def setUp(self):
-        self._folder = tempfile.TemporaryDirectory()
-        self.addCleanup(self._folder.cleanup)
-        self.client = TestClient(create_app(db_path=Path(self._folder.name) / 'test.sqlite3'))
-        self.client.__enter__()
-        self.addCleanup(self.client.__exit__, None, None, None)
+        super().setUp()
+        self.login(ENGINEER)
 
-    def test_rendered_wafer_map_image_is_accepted(self):
-        response = self.client.post('/api/predict',
-                                    files={'file': ('wafer.png', wafer_png(), 'image/png')})
+    def test_array_upload(self):
+        response = self.upload()
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
-        self.assertEqual(body['input_type'], 'image')
-        self.assertEqual(body['result']['input']['source'], 'image')
-        self.assertIn(body['result']['final_class'], body['result']['probabilities'])
+        self.assertEqual(body['input_type'], 'array')
+        self.assertEqual(len(body['probabilities']), 9)
+        self.assertIn('decision_path', body)
+        self.assertEqual(body['uploaded_by'], ENGINEER['employee_id'])
+        self.assertIsNotNone(body['model_version'])
+
+    def test_image_upload(self):
+        response = self.upload('wafer.png', wafer_png(), 'image/png')
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['input_type'], 'image')
 
     def test_image_and_array_paths_agree(self):
-        """같은 웨이퍼를 이미지로 올리든 배열로 올리든 같은 클래스가 나와야 한다."""
         from waferai.image_adapter import image_to_wafer_map
+        import json
 
         png = wafer_png()
         wafer_map, _ = image_to_wafer_map(png)
-        array_upload = json.dumps(wafer_map.astype(int).tolist()).encode()
+        array = json.dumps(wafer_map.astype(int).tolist()).encode()
 
-        via_image = self.client.post(
-            '/api/predict', files={'file': ('w.png', png, 'image/png')}).json()
-        via_array = self.client.post(
-            '/api/predict', files={'file': ('w.json', array_upload, 'application/json')}).json()
-        self.assertEqual(via_image['result']['final_class'], via_array['result']['final_class'])
+        via_image = self.upload('w.png', png, 'image/png').json()
+        via_array = self.upload('w.json', array, 'application/json').json()
+        self.assertEqual(via_image['final_class'], via_array['final_class'])
 
-    def test_oversized_image_reports_a_warning(self):
-        response = self.client.post(
-            '/api/predict', files={'file': ('big.png', wafer_png(800), 'image/png')})
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertTrue(response.json()['result']['input']['warnings'])
+    def test_invalid_map_rejected(self):
+        self.assertEqual(self.upload('bad.json', b'[[3]]').status_code, 422)
 
-    def test_foreign_palette_image_rejected(self):
+    def test_foreign_palette_rejected(self):
         rgb = np.zeros((64, 64, 3), dtype=np.uint8)
         rgb[10:50, 10:50] = (255, 0, 0)
-        response = self.client.post(
-            '/api/predict', files={'file': ('red.png', encode_png(rgb), 'image/png')})
+        response = self.upload('red.png', encode_png(rgb), 'image/png')
         self.assertEqual(response.status_code, 422)
         self.assertIn('색 체계', response.json()['detail'])
 
     def test_unsupported_extension_rejected(self):
-        response = self.client.post('/api/predict',
-                                    files={'file': ('notes.txt', b'0 1 2', 'text/plain')})
-        self.assertEqual(response.status_code, 422)
+        self.assertEqual(self.upload('notes.txt', b'0 1 2', 'text/plain').status_code, 422)
 
     def test_oversized_upload_rejected(self):
         payload = b'x' * (MAX_UPLOAD_BYTES + 10)
-        response = self.client.post('/api/predict',
-                                    files={'file': ('huge.png', payload, 'image/png')})
-        self.assertEqual(response.status_code, 413)
+        self.assertEqual(self.upload('huge.png', payload, 'image/png').status_code, 413)
+
+    def test_status_reports_active_model_and_thresholds(self):
+        body = self.client.get('/api/status').json()
+        self.assertEqual(len(body['classes']), 9)
+        self.assertIn('.png', body['accepted_formats'])
+        self.assertIsNotNone(body['model_version'])
+        # 저밀도 규칙은 실측 근거로 기본 꺼짐
+        self.assertIsNone(body['thresholds']['low_density'])
 
 
-@unittest.skipUnless(CHECKPOINT.is_file(), '체크포인트가 없습니다')
-class ThresholdConfigTest(unittest.TestCase):
-    def test_thresholds_are_injectable(self):
-        with tempfile.TemporaryDirectory() as folder:
-            app = create_app(db_path=Path(folder) / 'test.sqlite3',
-                             thresholds=Thresholds(confidence=0.99))
-            with TestClient(app) as client:
-                self.assertEqual(client.get('/api/status').json()['thresholds']['confidence'],
-                                 0.99)
+class ReviewTests(ApiTestCase):
+    def setUp(self):
+        super().setUp()
+        self.login(ENGINEER)
+        self.wafer_id = self.upload().json()['wafer_id']
+
+    def test_review_records_reviewer_and_keeps_ai_prediction(self):
+        original = self.client.get(f'/api/records/{self.wafer_id}').json()
+        response = self.client.post(f'/api/records/{self.wafer_id}/review',
+                                    json={'label': 'Center', 'memo': '수동 확인'})
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+
+        self.assertEqual(body['reviews'][0]['final_class'], 'Center')
+        self.assertEqual(body['reviews'][0]['reviewer_id'], ENGINEER['employee_id'])
+        # 원래 AI 예측은 덮어쓰지 않는다 — 나중에 모델 성능을 되짚어야 한다
+        self.assertEqual(body['probabilities'], original['probabilities'])
+        self.assertEqual(body['final_class'], original['final_class'])
+
+    def test_review_clears_the_queue_flag(self):
+        self.client.post(f'/api/records/{self.wafer_id}/review', json={'label': 'Center'})
+        self.assertFalse(
+            self.client.get(f'/api/records/{self.wafer_id}').json()['requires_human_review'])
+
+    def test_multiple_reviews_accumulate_newest_first(self):
+        for label in ('Center', 'Donut'):
+            self.client.post(f'/api/records/{self.wafer_id}/review', json={'label': label})
+        reviews = self.client.get(f'/api/records/{self.wafer_id}').json()['reviews']
+        self.assertEqual(len(reviews), 2)
+        self.assertEqual(reviews[0]['final_class'], 'Donut')
+
+    def test_invalid_label_rejected(self):
+        response = self.client.post(f'/api/records/{self.wafer_id}/review',
+                                    json={'label': 'NotAClass'})
+        self.assertEqual(response.status_code, 422)
+
+    def test_review_on_missing_record(self):
+        response = self.client.post('/api/records/does-not-exist/review',
+                                    json={'label': 'Center'})
+        self.assertEqual(response.status_code, 404)
+
+
+class RecordListTests(ApiTestCase):
+    def setUp(self):
+        super().setUp()
+        self.login(ENGINEER)
+
+    def test_pagination_and_summary_omits_heavy_map(self):
+        for _ in range(3):
+            self.upload()
+        rows = self.client.get('/api/records?limit=2').json()
+        self.assertEqual(len(rows), 2)
+        self.assertNotIn('wafer_map', rows[0])      # 목록에 맵 전체를 싣지 않는다
+        self.assertIn('final_class', rows[0])
+
+    def test_offset_returns_different_rows(self):
+        for _ in range(3):
+            self.upload()
+        first = self.client.get('/api/records?limit=1').json()
+        second = self.client.get('/api/records?limit=1&offset=1').json()
+        self.assertNotEqual(first[0]['wafer_id'], second[0]['wafer_id'])
+
+    def test_review_only_filter(self):
+        self.upload()
+        all_rows = self.client.get('/api/records').json()
+        pending = self.client.get('/api/records?review_only=true').json()
+        self.assertTrue(all(row['requires_human_review'] for row in pending))
+        self.assertLessEqual(len(pending), len(all_rows))
+
+    def test_detail_includes_map_and_reviews(self):
+        wafer_id = self.upload().json()['wafer_id']
+        body = self.client.get(f'/api/records/{wafer_id}').json()
+        self.assertIsInstance(body['wafer_map'], list)
+        self.assertEqual(body['reviews'], [])
+
+    def test_missing_record_returns_404(self):
+        self.assertEqual(self.client.get('/api/records/nope').status_code, 404)
+
+
+class ThresholdEffectTests(ApiTestCase):
+    def test_threshold_change_affects_new_predictions(self):
+        """설정 화면에서 바꾼 임계값이 실제 판정에 반영되어야 한다."""
+        self.login(SENIOR)
+        self.client.put('/api/settings/thresholds',
+                        json={'confidence': 0.999, 'high_density': 0.8})
+        self.logout()
+
+        self.login(ENGINEER)
+        body = self.upload().json()
+        self.assertTrue(body['requires_human_review'])
+        self.assertEqual(body['decision_path'], 'REVIEW_NEEDED')
+
+    def test_thresholds_persist_in_database(self):
+        self.login(SENIOR)
+        self.client.put('/api/settings/thresholds',
+                        json={'confidence': 0.77, 'high_density': 0.9})
+        self.logout()
+        self.login(ADMIN)
+        self.assertEqual(self.client.get('/api/settings/thresholds').json()['confidence'], 0.77)
+
+
+class PersistenceTests(ApiTestCase):
+    def test_records_survive_in_the_database(self):
+        self.login(ENGINEER)
+        wafer_id = self.upload().json()['wafer_id']
+        with self.client.app.state.session_factory() as session:
+            stored = session.get(WaferResult, wafer_id)
+            self.assertIsNotNone(stored)
+            self.assertEqual(stored.uploaded_by, ENGINEER['employee_id'])
+            self.assertIsNotNone(stored.model_id)
+
+
+if __name__ == '__main__':
+    unittest.main()

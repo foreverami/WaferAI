@@ -6,3 +6,5 @@ data/
 *.onnx
 .venv/
 .env
+*.db
+*.sqlite3

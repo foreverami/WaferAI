@@ -1,132 +1,109 @@
 """WaferAI Vision API.
 
-Phase 1 범위: 업로드 → 전처리 → 추론 → 판정 → 기록 → 검토.
-인증과 PostgreSQL 은 Phase 2, Grad-CAM 은 Phase 3 에서 붙인다.
+Phase 2 범위: 인증·권한, SQLAlchemy 모델, 설정 가능한 임계값.
+Grad-CAM 은 Phase 3, React 화면은 Phase 4 에서 붙인다.
 """
 from __future__ import annotations
 
 import hashlib
-import io
-import json
-import sqlite3
-import uuid
-from contextlib import asynccontextmanager, contextmanager
-from datetime import datetime, timezone
+from contextlib import asynccontextmanager
 from pathlib import Path
 from threading import Lock
-from typing import Literal
 
-import numpy as np
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import Depends, FastAPI
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from sqlalchemy import select
 
+from waferai.auth import AuthContext, current_user, get_session
 from waferai.backends import CLASSES
-from waferai.decision import Thresholds
-from waferai.image_adapter import UnsupportedImage, image_to_wafer_map
-from waferai.inference import DEFAULT_CHECKPOINT, DEFAULT_ONNX, Predictor
-from waferai.preprocess import validate_map
+from waferai.config import Settings, settings as default_settings
+from waferai.db import create_all, create_db_engine, create_session_factory
+from waferai.inference import Predictor
+from waferai.models import AiModel, User
+from waferai.routers import admin_routes, auth_routes, wafer_routes
 
 ROOT = Path(__file__).resolve().parent.parent
 
-MAX_UPLOAD_BYTES = 8 * 1024 * 1024
-MAX_MAP_SIDE = 512
-ARRAY_SUFFIXES = {'.npy', '.csv', '.json'}
-IMAGE_SUFFIXES = {'.png', '.jpg', '.jpeg'}
-RECORD_LIMIT = 200
 
+def _register_model(session_factory, predictor: Predictor, checkpoint: Path) -> int:
+    """돌고 있는 모델을 ai_model 에 등록하고 model_id 를 돌려준다.
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _parse_array(raw: bytes, suffix: str) -> np.ndarray:
-    if suffix == '.npy':
-        return np.load(io.BytesIO(raw), allow_pickle=False)
-    if suffix == '.csv':
-        return np.loadtxt(io.BytesIO(raw), delimiter=',', ndmin=2)
-    return np.asarray(json.loads(raw))
-
-
-class Review(BaseModel):
-    """검토 결과 본문.
-
-    모듈 최상위에 두어야 한다. `from __future__ import annotations` 로 애노테이션이
-    문자열이 되기 때문에, FastAPI 가 `get_type_hints` 로 모듈 전역에서 이 이름을
-    찾을 수 있어야 한다. 함수 안에 두면 해석에 실패해 본문이 쿼리 파라미터로 취급된다.
+    파일 SHA-256 으로 식별해, 같은 가중치를 재기동해도 행이 늘지 않는다.
+    어떤 예측이 어느 가중치에서 나왔는지 추적하려면 이 연결이 필요하다.
     """
+    digest = hashlib.sha256(Path(predictor.backend.source_path).read_bytes()).hexdigest()
+    metadata = predictor.metadata
 
-    label: Literal[tuple(CLASSES)]               # type: ignore[valid-type]
-    note: str = Field(default='', max_length=2000)
+    with session_factory() as session:
+        existing = session.execute(
+            select(AiModel).where(AiModel.file_sha256 == digest)).scalar_one_or_none()
+        if existing:
+            # 백엔드가 바뀌었을 수 있으니 최신 상태로 맞춘다.
+            existing.backend = predictor.backend.name
+            existing.is_active = True
+            session.add(existing)
+            session.commit()
+            return existing.model_id
+
+        # 새 가중치가 올라오면 이전 활성 모델을 내린다(ERD: 동시 1개만 활성).
+        for row in session.execute(select(AiModel).where(AiModel.is_active.is_(True))).scalars():
+            row.is_active = False
+            session.add(row)
+
+        model = AiModel(
+            model_name=checkpoint.name, version=f'epoch-{metadata.get("epoch") or "?"}',
+            file_sha256=digest, backend=predictor.backend.name,
+            val_accuracy=metadata.get('val_acc'), epoch=metadata.get('epoch'),
+            is_active=True)
+        session.add(model)
+        session.commit()
+        return model.model_id
 
 
-def _read_upload(file: UploadFile) -> tuple[np.ndarray, dict]:
-    """업로드 → (0/1/2 맵, 입력 진단 정보). 실패는 모두 422 로 올린다."""
-    raw = file.file.read(MAX_UPLOAD_BYTES + 1)
-    if len(raw) > MAX_UPLOAD_BYTES:
-        raise HTTPException(413, f'파일은 {MAX_UPLOAD_BYTES // 1024 // 1024}MB 이하여야 합니다')
+def create_app(config: Settings | None = None, *, database_url: str | None = None,
+               create_schema: bool = True) -> FastAPI:
+    config = config or default_settings
+    database_url = database_url or config.database_url
 
-    suffix = Path(file.filename or '').suffix.lower()
-    try:
-        if suffix in IMAGE_SUFFIXES:
-            return image_to_wafer_map(raw)
-        if suffix in ARRAY_SUFFIXES:
-            wafer_map = _parse_array(raw, suffix)
-            if wafer_map.ndim != 2 or max(wafer_map.shape, default=0) > MAX_MAP_SIDE:
-                raise ValueError(f'맵은 최대 {MAX_MAP_SIDE}x{MAX_MAP_SIDE} 의 2차원 배열이어야 합니다')
-            return validate_map(wafer_map), {'source': 'array', 'warnings': []}
-        raise ValueError('NPY, CSV, JSON, PNG, JPG 형식만 지원합니다')
-    except HTTPException:
-        raise
-    except (UnsupportedImage, ValueError) as error:
-        raise HTTPException(422, f'입력 오류: {error}') from error
-    except Exception as error:                      # 손상된 파일 등
-        raise HTTPException(422, f'입력을 읽을 수 없습니다: {error}') from error
+    problems = config.check_production_safety()
+    if problems:
+        raise RuntimeError('운영 설정에 문제가 있습니다:\n  - ' + '\n  - '.join(problems))
 
-
-def create_app(db_path=None, checkpoint=None, onnx_path=None, backend: str = 'auto',
-               thresholds: Thresholds | None = None) -> FastAPI:
-    db_path = Path(db_path or ROOT / 'data/waferai.sqlite3')
-    checkpoint = Path(checkpoint or ROOT / DEFAULT_CHECKPOINT)
-    onnx_path = Path(onnx_path or ROOT / DEFAULT_ONNX)
-    thresholds = thresholds or Thresholds()
-    lock = Lock()
-
-    @contextmanager
-    def connect():
-        connection = sqlite3.connect(db_path)
-        connection.row_factory = sqlite3.Row
-        try:
-            with connection:
-                yield connection
-        finally:
-            connection.close()
-
-    def migrate(connection) -> None:
-        connection.execute(
-            'CREATE TABLE IF NOT EXISTS records ('
-            'id TEXT PRIMARY KEY, created TEXT, filename TEXT, map TEXT, '
-            'result TEXT, model_version TEXT)')
-        connection.execute(
-            'CREATE TABLE IF NOT EXISTS reviews ('
-            'id INTEGER PRIMARY KEY, record_id TEXT, created TEXT, label TEXT, note TEXT)')
-        # 기존 개발 DB 에도 새 컬럼을 더한다. Phase 2 에서 Alembic 으로 대체한다.
-        existing = {row['name'] for row in connection.execute('PRAGMA table_info(records)')}
-        for column in ('input_type', 'input_info', 'backend'):
-            if column not in existing:
-                connection.execute(f'ALTER TABLE records ADD COLUMN {column} TEXT')
+    secret_key = config.resolved_secret_key()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        with connect() as connection:
-            migrate(connection)
-        app.state.predictor = Predictor.from_paths(checkpoint, onnx_path, backend, thresholds)
-        source = app.state.predictor.backend.source_path
-        app.state.version = hashlib.sha256(Path(source).read_bytes()).hexdigest()
-        yield
+        engine = create_db_engine(database_url)
+        app.state.engine = engine
+        app.state.session_factory = create_session_factory(engine)
+        if create_schema:
+            # 개발·테스트용. 운영은 `alembic upgrade head` 로 스키마를 만든다.
+            create_all(engine)
+
+        app.state.auth = AuthContext(secret_key, config.cookie_name,
+                                     config.access_token_minutes)
+        app.state.predict_lock = Lock()
+
+        checkpoint = Path(config.checkpoint_path)
+        if not checkpoint.is_absolute():
+            checkpoint = ROOT / checkpoint
+        onnx_path = Path(config.onnx_path)
+        if not onnx_path.is_absolute():
+            onnx_path = ROOT / onnx_path
+
+        app.state.predictor = Predictor.from_paths(
+            checkpoint, onnx_path, config.backend)
+        app.state.model_id = _register_model(app.state.session_factory,
+                                             app.state.predictor, checkpoint)
+        try:
+            yield
+        finally:
+            engine.dispose()
 
     app = FastAPI(title='WaferAI Vision API', lifespan=lifespan)
+    app.include_router(auth_routes.router)
+    app.include_router(wafer_routes.router)
+    app.include_router(admin_routes.router)
 
     @app.get('/')
     def home():
@@ -134,78 +111,22 @@ def create_app(db_path=None, checkpoint=None, onnx_path=None, backend: str = 'au
 
     @app.get('/healthz')
     def healthz():
+        """인증 없이 접근 가능. 로드밸런서와 Docker 헬스체크가 부른다."""
         return {'status': 'ok', 'backend': app.state.predictor.backend.name}
 
     @app.get('/api/status')
-    def status():
+    def status(_: User = Depends(current_user), session=Depends(get_session)):
+        active = session.execute(
+            select(AiModel).where(AiModel.is_active.is_(True))).scalar_one_or_none()
         return {
             'model_ready': True,
             'metadata': app.state.predictor.metadata,
-            'model_version': app.state.version,
+            'model_version': active.file_sha256 if active else None,
             'classes': CLASSES,
-            'thresholds': app.state.predictor.thresholds.as_dict(),
-            'accepted_formats': sorted(ARRAY_SUFFIXES | IMAGE_SUFFIXES),
+            'thresholds': wafer_routes.load_thresholds(session).as_dict(),
+            'accepted_formats': sorted(wafer_routes.ARRAY_SUFFIXES
+                                       | wafer_routes.IMAGE_SUFFIXES),
         }
-
-    @app.get('/api/records')
-    def records():
-        with connect() as connection:
-            rows = connection.execute(
-                'SELECT id, created, filename, result, model_version, input_type '
-                'FROM records ORDER BY created DESC LIMIT ?', (RECORD_LIMIT,)).fetchall()
-            output = []
-            for row in rows:
-                item = dict(row)
-                item['result'] = json.loads(item['result'])
-                latest = connection.execute(
-                    'SELECT * FROM reviews WHERE record_id=? ORDER BY id DESC LIMIT 1',
-                    (item['id'],)).fetchone()
-                item['review'] = dict(latest) if latest else None
-                output.append(item)
-            return output
-
-    @app.get('/api/records/{record_id}')
-    def detail(record_id: str):
-        with connect() as connection:
-            row = connection.execute('SELECT * FROM records WHERE id=?', (record_id,)).fetchone()
-            if not row:
-                raise HTTPException(404, '기록이 없습니다')
-            item = dict(row)
-            for key in ('map', 'result'):
-                item[key] = json.loads(item[key])
-            item['input_info'] = json.loads(item['input_info']) if item.get('input_info') else None
-            item['reviews'] = [dict(review) for review in connection.execute(
-                'SELECT * FROM reviews WHERE record_id=? ORDER BY id DESC', (record_id,))]
-            return item
-
-    @app.post('/api/predict')
-    def inference(file: UploadFile):
-        wafer_map, input_info = _read_upload(file)
-        with lock:
-            result = app.state.predictor.predict(wafer_map)
-        result['input'] = input_info
-
-        record_id = str(uuid.uuid4())
-        with connect() as connection:
-            connection.execute(
-                'INSERT INTO records (id, created, filename, map, result, model_version, '
-                'input_type, input_info, backend) VALUES (?,?,?,?,?,?,?,?,?)',
-                (record_id, _now(), file.filename,
-                 json.dumps(wafer_map.astype(int).tolist()), json.dumps(result),
-                 app.state.version, input_info.get('source'), json.dumps(input_info),
-                 app.state.predictor.backend.name))
-        return detail(record_id)
-
-    @app.post('/api/records/{record_id}/review')
-    def review(record_id: str, body: Review):
-        with connect() as connection:
-            if not connection.execute('SELECT id FROM records WHERE id=?',
-                                      (record_id,)).fetchone():
-                raise HTTPException(404, '기록이 없습니다')
-            connection.execute(
-                'INSERT INTO reviews (record_id, created, label, note) VALUES (?,?,?,?)',
-                (record_id, _now(), body.label, body.note))
-        return detail(record_id)
 
     return app
 

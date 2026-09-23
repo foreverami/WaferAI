@@ -3,30 +3,69 @@
 WM-811K 로 학습한 CoAtNet-0 9클래스 분류기를 웹 서비스로 배포하는 프로젝트.
 Colab 학습 코드는 `training_reference.py` 에 보존돼 있다.
 
-현재 **Phase 1** 까지 완료: 공용 전처리 · 추론 백엔드 · 판정 로직 · `/api/predict`.
-인증과 PostgreSQL 은 Phase 2, Grad-CAM 은 Phase 3 에서 붙인다.
+현재 **Phase 2** 까지 완료: 공용 전처리 · 추론 백엔드 · 판정 로직 · 인증/권한 ·
+SQLAlchemy 모델 · Alembic 마이그레이션. Grad-CAM 은 Phase 3, React 화면은 Phase 4.
 
 ## 설치
 
 ```sh
 python3 -m pip install -r requirements.txt
+cp .env.example .env          # 값을 채운다
 ```
 
 ## 실행
 
 ```sh
-python3 -m unittest discover -s tests -v       # 테스트 44개
-python3 -m scripts.export_onnx                 # .pth → .onnx (동등성 검증 포함)
-python3 -m scripts.benchmark                   # 배포 서버에서 백엔드 실측
+python3 -m unittest discover -s tests -v       # 테스트 96개
+python3 -m alembic upgrade head                # 스키마 생성/갱신
+python3 -m scripts.create_user --employee-id 202104346 --name 이름 \
+    --email me@example.com --role admin        # 첫 관리자 (비밀번호는 실행 중 입력)
 python3 -m uvicorn waferai.server:app --host 127.0.0.1 --port 8000
 ```
 
 브라우저에서 http://127.0.0.1:8000 을 연다.
 
 ```sh
-python3 -m waferai.inference --image wafer.png   # 렌더링 이미지로 예측
-python3 -m waferai.inference --map wafer.npy     # 0/1/2 맵으로 예측
+python3 -m scripts.export_onnx                 # .pth → .onnx (동등성 검증 포함)
+python3 -m scripts.benchmark                   # 배포 서버에서 백엔드 실측
+python3 -m waferai.inference --image wafer.png  # 렌더링 이미지로 예측
+python3 -m waferai.inference --map wafer.npy    # 0/1/2 맵으로 예측
 ```
+
+## 인증과 권한
+
+로그인은 JWT 를 **httpOnly 쿠키**에 담는다. localStorage 에 두면 XSS 한 번에
+탈취되지만 httpOnly 쿠키는 자바스크립트가 읽지 못한다. CSRF 는 SameSite 로 막는다.
+
+| 등급 | 조회·검토 | 임계값 변경 | 계정 관리 |
+|---|---|---|---|
+| `engineer` | O | X | X |
+| `senior_engineer` | O | O | X |
+| `admin` | O | O | O |
+
+UI 에서 버튼을 감추는 것은 방어가 아니다. 개발자도구로 우회되므로 모든 엔드포인트가
+서버에서 등급을 확인한다. 비밀번호는 bcrypt 로 해싱하되, 72바이트 한계 때문에
+SHA-256 으로 길이를 먼저 고정한다 — 한글은 글자당 3바이트라 24자면 한도에 닿는다.
+
+## 데이터베이스
+
+개발·테스트는 SQLite, 운영은 PostgreSQL. 같은 SQLAlchemy 모델이 양쪽에서 돌도록
+JSONB 같은 Postgres 전용 타입은 쓰지 않는다.
+
+```sh
+python3 -m alembic upgrade head                        # 적용
+python3 -m alembic revision --autogenerate -m "설명"    # 모델 수정 후 생성
+```
+
+`tests/test_migrations.py` 가 마이그레이션 결과와 모델 정의가 일치하는지 검사한다.
+모델만 고치고 마이그레이션을 빼먹으면 개발에서는 `create_all` 이 덮어줘서 멀쩡해
+보이지만 운영에서 터지므로, 그 간극을 배포 전에 잡는다.
+
+ERD 문서의 7테이블 중 Vision 파이프라인에 해당하는 5개만 만들었다. Sensor AI 쪽
+(equipment, sensor_alert, unified_report)과 retrain_job 은 범위 밖이다.
+ERD 에 없던 `users` 를 추가했다 — UIUX 문서 화면 8 이 사번·부서·권한을 요구하는데
+ERD 에는 사용자 테이블이 없었고, `review_result.reviewer` 가 자유 문자열이라 누가
+검토했는지 추적할 수 없었다.
 
 ## 입력 형식
 
@@ -62,15 +101,46 @@ python3 -m waferai.inference --map wafer.npy     # 0/1/2 맵으로 예측
 말하고, 기능상세설명서 쪽에는 정의되지 않은 구간이 있었다. 아래 4단계로 통일했다.
 위에서부터 순서대로 검사한다.
 
-| 순서 | 조건 | 결과 | 경로 |
-|---|---|---|---|
-| ① | 결함밀도 < 0.05 | `none` | `RULE_BASE_NONE` |
-| ② | 결함밀도 > 0.80 | `Near-full` | `RULE_BASE_NEAR_FULL` |
-| ③ | 확신도 ≥ 0.80 | AI 1순위 | `AUTO_PASS` |
-| ④ | 그 외 | AI 1순위(잠정) | `REVIEW_NEEDED` |
+| 순서 | 조건 | 기본값 | 결과 | 경로 |
+|---|---|---|---|---|
+| ① | 결함밀도 < `low_density` | **꺼짐** | `none` | `RULE_BASE_NONE` |
+| ② | 결함밀도 > `high_density` | 0.80 | `Near-full` | `RULE_BASE_NEAR_FULL` |
+| ③ | 확신도 ≥ `confidence` | 0.80 | AI 1순위 | `AUTO_PASS` |
+| ④ | 그 외 | — | AI 1순위(잠정) | `REVIEW_NEEDED` |
 
-결함밀도 = 값2 / (값1 + 값2). 배경은 분모에서 뺀다. 임계값 3개는
-`Thresholds` 로 주입하며, Phase 2 에서 설정 테이블로 옮긴다.
+결함밀도 = 값2 / (값1 + 값2). 배경은 분모에서 뺀다.
+
+### ① 이 기본으로 꺼져 있는 이유
+
+기능상세설명서 §3.3.2 는 `defect_ratio < 0.05 → none` 을 지시하지만, 검증 분할
+10,208건으로 재 보니 **정확도를 떨어뜨렸다.**
+
+| | 규칙 켬(0.05) | 규칙 끔 |
+|---|---|---|
+| 전체 정확도 | 93.78% | **96.45%** |
+| 잘못 새어나간 건 | 430건 | **143건** |
+| 엔지니어 검토 부담 | 4.67% | 4.95% |
+
+규칙에 걸린 1,087건 중 **291건이 실제로는 결함**이었다(Loc 118 · Edge-Ring 54 ·
+Scratch 50 · Edge-Loc 38 · Center 31). 같은 건들을 AI 에게 맡기면 98.34% 로 맞힌다.
+결함 다이가 5% 미만이어도 얇은 Scratch 나 작은 Loc 은 명백한 결함인데, 픽셀을 세는
+규칙은 패턴을 못 보기 때문이다. 0.01 까지 낮춰도 규칙 정확도가 9.1% 라 임계값
+조정이 아니라 규칙 자체가 틀렸다. 설정으로 되살릴 수는 있게 두되 기본은 끈다.
+
+②는 유지한다. 0.80 에서 걸린 20건이 전부 실제 Near-full 이었고 AI 도 같은 답을
+냈다(규칙 100% / AI 100%). 측정상 이득은 없지만, 재학습으로 모델이 드리프트해도
+거의 전면 불량인 웨이퍼는 확정적으로 잡아주는 방어선이 된다.
+
+### 임계값 변경
+
+`settings` 테이블에 저장되며 `senior_engineer` 이상이 바꾼다.
+
+```sh
+GET  /api/settings/thresholds
+PUT  /api/settings/thresholds     {"low_density": null, "high_density": 0.8, "confidence": 0.8}
+```
+
+`null` 은 해당 규칙을 끈다는 뜻이다. UIUX 문서 화면 6·7 의 슬라이더가 이 API 를 쓴다.
 
 ## 추론 백엔드
 
