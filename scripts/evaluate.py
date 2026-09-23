@@ -46,7 +46,8 @@ def batched_probabilities(backend, maps: list[np.ndarray], label: str) -> np.nda
         batch = np.concatenate([to_model_input(m) for m in chunk], axis=0)
         if backend.name == 'torch':
             with torch.inference_mode():
-                probs = backend.model(torch.from_numpy(batch)).softmax(dim=1).cpu().numpy()
+                tensor = torch.from_numpy(batch).to(backend.device)
+                probs = backend.model(tensor).softmax(dim=1).float().cpu().numpy()
         else:
             logits = backend.session.run(None, {backend.input_name: batch})[0]
             shifted = logits - logits.max(axis=1, keepdims=True)
@@ -164,6 +165,9 @@ def main() -> None:
     parser.add_argument('--checkpoint', default='models/best_coatnet_model_optimized.pth')
     parser.add_argument('--onnx', default='models/coatnet_wafer.onnx')
     parser.add_argument('--backend', default='torch', choices=['auto', 'onnx', 'torch'])
+    parser.add_argument('--device', default='cpu', choices=['cpu', 'mps', 'cuda'],
+                        help='평가 전용 가속기. 서빙은 CPU 이지만 측정은 GPU 로 해도 된다 '
+                             '(MPS 는 CPU 와 확률 오차 3e-07 로 동일함을 확인했다)')
     parser.add_argument('--limit', type=int, help='검증 표본 수 상한 (빠른 확인용)')
     parser.add_argument('--image-check', type=int, default=300,
                         help='이미지 경로 비교에 쓸 표본 수 (0 이면 생략)')
@@ -187,9 +191,10 @@ def main() -> None:
     if args.limit:
         val_maps, val_labels = val_maps[:args.limit], val_labels[:args.limit]
 
-    backend = build_backend(args.checkpoint, args.onnx, args.backend)
+    backend = build_backend(args.checkpoint, args.onnx, args.backend, args.device)
     thresholds = Thresholds()
-    print(f'백엔드: {backend.name}    검증 표본: {len(val_maps):,}개\n')
+    device = getattr(backend, 'device', 'cpu')
+    print(f'백엔드: {backend.name} ({device})    검증 표본: {len(val_maps):,}개\n')
 
     print('[1] 검증 분할 정확도 — 학습 기록 재현 확인')
     cache = Path(args.cache) if args.cache else None
@@ -197,7 +202,7 @@ def main() -> None:
     if cache and cache.is_file():
         stored = np.load(cache, allow_pickle=False)
         if stored['probabilities'].shape[0] == len(val_maps) and \
-                str(stored['backend']) == backend.name:
+                str(stored['backend']) == f'{backend.name}:{device}':
             val_probs = stored['probabilities']
             print(f'      캐시 재사용: {cache}')
         else:
@@ -206,7 +211,8 @@ def main() -> None:
         val_probs = batched_probabilities(backend, val_maps, '추론 중')
     if cache and not cache.is_file():
         cache.parent.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(cache, probabilities=val_probs, backend=backend.name)
+        np.savez_compressed(cache, probabilities=val_probs,
+                            backend=f'{backend.name}:{device}')
     val_pred = val_probs.argmax(axis=1)
     accuracy = float((val_pred == val_labels).mean())
     recorded = getattr(backend, 'metadata', {}).get('val_acc')

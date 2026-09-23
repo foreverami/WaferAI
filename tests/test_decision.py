@@ -7,10 +7,26 @@ CONFIDENT = {'Center': 0.85, 'Donut': 0.10, 'none': 0.05}
 UNCERTAIN = {'Center': 0.55, 'Donut': 0.30, 'none': 0.15}
 
 
+#: 저밀도 규칙은 기본으로 꺼져 있다. 규칙 동작을 검증할 때만 켠다.
+LOW_DENSITY_ON = Thresholds(low_density=0.05)
+
+
 class DecisionTests(unittest.TestCase):
-    def test_low_density_forces_none_and_ignores_ai(self):
-        """밀도가 낮으면 AI 가 Center 를 강하게 주장해도 none 으로 확정한다."""
+    def test_low_density_rule_is_off_by_default(self):
+        """검증 데이터에서 해로웠으므로 기본으로 꺼져 있어야 한다.
+
+        켜면 1,087건 중 291건의 실제 결함을 none 으로 덮는다(정확도 73.2%).
+        같은 건들을 AI 에게 맡기면 98.3% 다.
+        """
+        self.assertIsNone(Thresholds().low_density)
         result = decide(CONFIDENT, defect_ratio=0.01)
+        self.assertEqual(result['final_class'], 'Center')        # AI 판단을 따른다
+        self.assertEqual(result['decision_path'], DecisionPath.AUTO_PASS.value)
+        self.assertFalse(result['rule_base_applied'])
+
+    def test_low_density_forces_none_when_explicitly_enabled(self):
+        """설정으로 되살릴 수는 있어야 한다."""
+        result = decide(CONFIDENT, defect_ratio=0.01, thresholds=LOW_DENSITY_ON)
         self.assertEqual(result['final_class'], 'none')
         self.assertEqual(result['decision_path'], DecisionPath.RULE_BASE_NONE.value)
         self.assertTrue(result['rule_base_applied'])
@@ -25,7 +41,7 @@ class DecisionTests(unittest.TestCase):
 
     def test_density_rules_outrank_confidence(self):
         """확신도가 낮아도 밀도 규칙에 걸리면 검토로 넘기지 않는다."""
-        self.assertFalse(decide(UNCERTAIN, 0.01)['requires_human_review'])
+        self.assertFalse(decide(UNCERTAIN, 0.01, LOW_DENSITY_ON)['requires_human_review'])
         self.assertFalse(decide(UNCERTAIN, 0.99)['requires_human_review'])
 
     def test_auto_pass_when_confident(self):
@@ -51,8 +67,9 @@ class DecisionTests(unittest.TestCase):
                          DecisionPath.REVIEW_NEEDED.value)
 
         # 경계값 자체는 규칙에 걸리지 않는다
-        self.assertEqual(decide(CONFIDENT, thresholds.low_density)['decision_path'],
-                         DecisionPath.AUTO_PASS.value)
+        self.assertEqual(
+            decide(CONFIDENT, LOW_DENSITY_ON.low_density, LOW_DENSITY_ON)['decision_path'],
+            DecisionPath.AUTO_PASS.value)
         self.assertEqual(decide(CONFIDENT, thresholds.high_density)['decision_path'],
                          DecisionPath.AUTO_PASS.value)
 
@@ -73,6 +90,13 @@ class DecisionTests(unittest.TestCase):
                        {'low_density': 0.9, 'high_density': 0.2}):
             with self.assertRaises(ValueError):
                 Thresholds(**kwargs)
+
+    def test_rules_can_be_disabled_individually(self):
+        both_off = Thresholds(low_density=None, high_density=None)
+        self.assertEqual(decide(CONFIDENT, 0.0, both_off)['decision_path'],
+                         DecisionPath.AUTO_PASS.value)
+        self.assertEqual(decide(CONFIDENT, 1.0, both_off)['decision_path'],
+                         DecisionPath.AUTO_PASS.value)
 
     def test_empty_distribution_rejected(self):
         with self.assertRaises(ValueError):
