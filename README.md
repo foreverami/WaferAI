@@ -3,8 +3,8 @@
 WM-811K 로 학습한 CoAtNet-0 9클래스 분류기를 웹 서비스로 배포하는 프로젝트.
 Colab 학습 코드는 `training_reference.py` 에 보존돼 있다.
 
-현재 **Phase 2** 까지 완료: 공용 전처리 · 추론 백엔드 · 판정 로직 · 인증/권한 ·
-SQLAlchemy 모델 · Alembic 마이그레이션. Grad-CAM 은 Phase 3, React 화면은 Phase 4.
+현재 **Phase 3** 까지 완료: 공용 전처리 · 추론 백엔드 · 판정 로직 · 인증/권한 ·
+SQLAlchemy 모델 · Alembic 마이그레이션 · Grad-CAM · 검토 워크플로. React 화면은 Phase 4.
 
 ## 설치
 
@@ -16,7 +16,7 @@ cp .env.example .env          # 값을 채운다
 ## 실행
 
 ```sh
-python3 -m unittest discover -s tests -v       # 테스트 96개
+python3 -m unittest discover -s tests -v       # 테스트 121개
 python3 -m alembic upgrade head                # 스키마 생성/갱신
 python3 -m scripts.create_user --employee-id 202104346 --name 이름 \
     --email me@example.com --role admin        # 첫 관리자 (비밀번호는 실행 중 입력)
@@ -46,6 +46,58 @@ python3 -m waferai.inference --map wafer.npy    # 0/1/2 맵으로 예측
 UI 에서 버튼을 감추는 것은 방어가 아니다. 개발자도구로 우회되므로 모든 엔드포인트가
 서버에서 등급을 확인한다. 비밀번호는 bcrypt 로 해싱하되, 72바이트 한계 때문에
 SHA-256 으로 길이를 먼저 고정한다 — 한글은 글자당 3바이트라 24자면 한도에 닿는다.
+
+## Human-in-the-Loop
+
+UIUX 문서의 세 가지 처리 경로를 그대로 API 로 옮겼다.
+
+| 화면 동작 | 엔드포인트 |
+|---|---|
+| 1순위 승인 (대형 버튼) | `POST /api/records/{id}/approve` |
+| 2순위 수정 (링크) | `POST /api/records/{id}/approve` `{"rank": 2}` |
+| 수동 라벨링 (드롭다운) | `POST /api/records/{id}/review` `{"label": "Scratch"}` |
+| 리뷰 대기열 | `GET /api/records?review_only=true` |
+
+`approve` 는 클래스명을 클라이언트가 되돌려 보내지 않는다. 서버가 저장된 확률에서
+직접 고르므로 화면에 보이는 값과 저장되는 값이 어긋날 여지가 없다.
+
+**원래 AI 예측은 어떤 경로로도 덮어쓰지 않는다.** 검토 결과는 `review_result` 에
+따로 쌓인다. 나중에 모델 성능을 되짚으려면 AI 가 원래 뭐라고 했는지가 남아 있어야
+한다. 검토가 끝나면 `requires_human_review` 만 내려 대기열에서 빠진다.
+
+## Grad-CAM (설명가능성)
+
+```sh
+GET /api/records/{id}/heatmap                    # AI 1순위 기준
+GET /api/records/{id}/heatmap?class_name=Donut   # 2순위 등 특정 클래스
+```
+
+`pytorch-grad-cam` 라이브러리를 쓰지 않고 `waferai/gradcam.py` 에 직접 구현했다.
+CoAtNet 마지막 스테이지 출력이 **(1, 768, 7, 7) 4D NCHW** 로 실측돼, 라이브러리가
+필요한 지점인 어텐션 토큰 → 공간 해상도 변환(`reshape_transform`)이 이 모델에는
+아예 필요 없다. 기능상세설명서 §3.3.3 의 `reshape_transform_coatnet()` 언급은
+불필요한 내용이다. 남는 계산은 30줄 남짓이라 배포 이미지에 의존성을 더할 이유가 없다.
+
+**지연 생성(Lazy Eval)** — ERD 와 플로우차트의 설계를 따른다. 실제로 열어보는 건
+검토 대상 5% 남짓이라 전부 미리 만들면 서버가 낭비된다. 한 번 만든 뒤에는 디스크에서
+낸다.
+
+**PyTorch 지연 로딩** — `/predict` 는 ONNX 로 돌고 Grad-CAM 만 PyTorch 가 필요하다.
+아무도 히트맵을 열지 않으면 102MB 를 아예 올리지 않는다. ONNX Runtime 은 순전파만
+하므로 역전파가 필요한 Grad-CAM 을 돌릴 수 없다.
+
+### 히트맵이 실제로 결함을 가리키는지
+
+값이 나오는 것만으로는 부족하다. 위치가 엉뚱하면 설명가능성이 아니라 잘못된 확신을
+준다. `tests/test_gradcam.py` 가 CAM 질량 중심의 정규화 반경을 재서 검증한다.
+
+| 합성 패턴 | CAM 질량 반경 | 기대 |
+|---|---|---|
+| Center | 0.405 | 가운데 |
+| Donut | 0.547 | 중간 |
+| Edge-Ring | 0.880 | 가장자리 |
+
+결함 기하와 순서가 정확히 일치한다.
 
 ## 데이터베이스
 

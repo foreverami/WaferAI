@@ -8,15 +8,18 @@ from pathlib import Path
 
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from waferai.auth import current_user, get_session, require_engineer
 from waferai.decision import Thresholds
+from waferai.heatmap import top_class
 from waferai.image_adapter import UnsupportedImage, image_to_wafer_map
 from waferai.models import ReviewResult, Setting, THRESHOLDS_KEY, User, WaferResult
 from waferai.preprocess import validate_map
-from waferai.schemas import ReviewRequest, WaferDetail, WaferSummary
+from waferai.schemas import (ApproveRequest, ReviewRequest, WaferDetail,
+                              WaferSummary)
 
 router = APIRouter(prefix='/api', tags=['wafers'])
 
@@ -134,19 +137,84 @@ def detail(wafer_id: str, session: Session = Depends(get_session),
     return _detail(session, wafer_id)
 
 
+def _record_review(session: Session, wafer: WaferResult, label: str,
+                   reviewer_id: str, memo: str) -> None:
+    """검토 한 건을 쌓는다.
+
+    원래 AI 예측은 건드리지 않는다. 나중에 모델 성능을 되짚으려면 AI 가 원래
+    뭐라고 했는지가 남아 있어야 한다. 검토가 끝났으므로 대기열에서만 내린다.
+    """
+    session.add(ReviewResult(wafer_id=wafer.wafer_id, final_class=label,
+                             reviewer_id=reviewer_id, review_memo=memo))
+    wafer.requires_human_review = False
+    session.add(wafer)
+    session.flush()
+
+
 @router.post('/records/{wafer_id}/review', response_model=WaferDetail)
 def review(wafer_id: str, body: ReviewRequest,
            user: User = Depends(require_engineer),
            session: Session = Depends(get_session)):
+    """수동 라벨링 — UIUX 문서의 드롭다운 경로."""
+    wafer = session.get(WaferResult, wafer_id)
+    if wafer is None:
+        raise HTTPException(404, '기록이 없습니다')
+    _record_review(session, wafer, body.label, user.employee_id, body.memo)
+    return _detail(session, wafer_id)
+
+
+@router.post('/records/{wafer_id}/approve', response_model=WaferDetail)
+def approve(wafer_id: str, body: ApproveRequest | None = None,
+            user: User = Depends(require_engineer),
+            session: Session = Depends(get_session)):
+    """AI 순위를 그대로 확정 — UIUX 문서의 '1순위 승인' 대형 버튼과 '2순위 수정' 링크.
+
+    클라이언트가 클래스명을 다시 보내지 않아도 되도록 서버가 확률에서 직접 고른다.
+    화면에 보이는 값과 저장되는 값이 어긋날 여지를 없앤다.
+    """
     wafer = session.get(WaferResult, wafer_id)
     if wafer is None:
         raise HTTPException(404, '기록이 없습니다')
 
-    # 원래 AI 예측은 건드리지 않는다. 검토는 따로 쌓아야 나중에 모델 성능을
-    # 되짚을 수 있다. 검토가 끝났으므로 대기열에서만 내린다.
-    session.add(ReviewResult(wafer_id=wafer_id, final_class=body.label,
-                             reviewer_id=user.employee_id, review_memo=body.memo))
-    wafer.requires_human_review = False
-    session.add(wafer)
-    session.flush()
+    rank = (body.rank if body else 1) or 1
+    ordered = sorted(wafer.probabilities.items(), key=lambda kv: kv[1], reverse=True)
+    if rank > len(ordered):
+        raise HTTPException(422, f'{rank}순위가 없습니다')
+
+    _record_review(session, wafer, ordered[rank - 1][0], user.employee_id,
+                   body.memo if body else '')
     return _detail(session, wafer_id)
+
+
+@router.get('/records/{wafer_id}/heatmap')
+def heatmap(request: Request, wafer_id: str,
+            class_name: str | None = Query(None, description='생략하면 AI 1순위'),
+            _: User = Depends(current_user),
+            session: Session = Depends(get_session)):
+    """Grad-CAM 히트맵 PNG.
+
+    지연 생성한다(ERD·플로우차트의 Lazy Eval). 실제로 열어보는 건 검토 대상
+    5% 남짓이라 전부 미리 만들면 서버가 낭비된다. 한 번 만든 뒤에는 디스크에서 낸다.
+    """
+    wafer = session.get(WaferResult, wafer_id)
+    if wafer is None:
+        raise HTTPException(404, '기록이 없습니다')
+    if class_name is not None and class_name not in wafer.probabilities:
+        raise HTTPException(422, f'알 수 없는 클래스입니다: {class_name}')
+
+    service = request.app.state.heatmaps
+    target = class_name or top_class(wafer.probabilities)
+    try:
+        path = service.generate(wafer_id, np.asarray(wafer.wafer_map, dtype=np.uint8),
+                                target)
+    except Exception as error:
+        raise HTTPException(500, f'히트맵 생성에 실패했습니다: {error}') from error
+
+    # ERD 의 heatmap_path — 1순위 히트맵만 기록한다.
+    if class_name is None and wafer.heatmap_path != str(path):
+        wafer.heatmap_path = str(path)
+        session.add(wafer)
+        session.flush()
+
+    return FileResponse(path, media_type='image/png',
+                        headers={'Cache-Control': 'private, max-age=3600'})

@@ -53,6 +53,13 @@ class ReviewRequest(BaseModel):
     memo: str = Field(default='', max_length=2000)
 
 
+class ApproveRequest(BaseModel):
+    """AI 순위를 그대로 확정한다. rank=1 은 1순위 승인, rank=2 는 2순위 수정."""
+
+    rank: int = Field(default=1, ge=1, le=9)
+    memo: str = Field(default='', max_length=2000)
+
+
 class ReviewOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -87,6 +94,7 @@ class WaferDetail(WaferSummary):
     input_info: dict | None
     reviews: list[ReviewOut] = Field(default_factory=list)
     model_version: str | None = None
+    heatmap_path: str | None = None
 
 
 class ThresholdsIn(BaseModel):

@@ -18,6 +18,7 @@ from waferai.auth import AuthContext, current_user, get_session
 from waferai.backends import CLASSES
 from waferai.config import Settings, settings as default_settings
 from waferai.db import create_all, create_db_engine, create_session_factory
+from waferai.heatmap import HeatmapService
 from waferai.inference import Predictor
 from waferai.models import AiModel, User
 from waferai.routers import admin_routes, auth_routes, wafer_routes
@@ -95,9 +96,12 @@ def create_app(config: Settings | None = None, *, database_url: str | None = Non
             checkpoint, onnx_path, config.backend)
         app.state.model_id = _register_model(app.state.session_factory,
                                              app.state.predictor, checkpoint)
+        # PyTorch 모델은 첫 히트맵 요청에서 올린다. 아무도 열지 않으면 102MB 를 아낀다.
+        app.state.heatmaps = HeatmapService(checkpoint, config.heatmap_dir, config.device)
         try:
             yield
         finally:
+            app.state.heatmaps.release()
             engine.dispose()
 
     app = FastAPI(title='WaferAI Vision API', lifespan=lifespan)

@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     onnx_path: str = 'models/coatnet_wafer.onnx'
     backend: str = 'auto'
     device: str = 'cpu'                         # 배포 서버에 GPU 가 없다
+    # Grad-CAM 결과 보관 위치. Phase 5 에서 Docker 볼륨으로 마운트한다.
+    heatmap_dir: str = str(ROOT / 'data/heatmaps')
 
     @property
     def is_production(self) -> bool:

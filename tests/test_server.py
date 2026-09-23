@@ -1,7 +1,7 @@
 import unittest
 
 import numpy as np
-from conftest import (ADMIN, ENGINEER, SENIOR, SYNTHETIC_MAP, ApiTestCase, wafer_png)
+from tests.conftest import (ADMIN, ENGINEER, SENIOR, SYNTHETIC_MAP, ApiTestCase, wafer_png)
 
 from waferai.image_adapter import encode_png
 from waferai.models import WaferResult

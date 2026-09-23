@@ -1,6 +1,6 @@
 import unittest
 
-from conftest import ADMIN, ENGINEER, SENIOR, ApiTestCase
+from tests.conftest import ADMIN, ENGINEER, SENIOR, ApiTestCase
 from waferai.auth import (create_access_token, decode_access_token, hash_password,
                           verify_password)
 from waferai.models import Role
