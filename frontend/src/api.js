@@ -76,8 +76,14 @@ export const api = {
   // 목록에는 반드시 thumbnailUrl 을 쓴다. heatmapUrl 은 역전파를 돌리므로
   // 카드마다 부르면 지연 생성 설계가 무너진다.
   thumbnailUrl: (id) => `/api/records/${id}/thumbnail`,
-  heatmapUrl: (id, className) =>
-    `/api/records/${id}/heatmap${className ? `?class_name=${encodeURIComponent(className)}` : ''}`,
+  heatmapUrl: (id, className, retry) => {
+    // 쿼리를 직접 이어붙이면 인자가 늘 때 ?/& 를 틀리기 쉬워 URLSearchParams 로 만든다.
+    const params = new URLSearchParams()
+    if (className) params.set('class_name', className)
+    if (retry) params.set('retry', String(retry))   // 실패 응답 캐시를 피하기 위한 값
+    const query = params.toString()
+    return `/api/records/${id}/heatmap${query ? `?${query}` : ''}`
+  },
 
   thresholds: () => request('/api/settings/thresholds'),
   saveThresholds: (values) =>

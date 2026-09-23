@@ -22,6 +22,10 @@ export default function WaferDetail({ waferId, onClose, onReviewed }) {
   const [error, setError] = useState(null)
   const [view, setView] = useState('overlay')
   const [busy, setBusy] = useState(false)
+  // 'loading' | 'ready' | 'error' — 히트맵 이미지 적재 상태
+  const [heatmap, setHeatmap] = useState('loading')
+  // 재시도 횟수. URL 에 실어야 브라우저가 실패한 응답을 캐시에서 꺼내지 않는다.
+  const [attempt, setAttempt] = useState(0)
   const [manualLabel, setManualLabel] = useState('')
   const [memo, setMemo] = useState('')
 
@@ -29,6 +33,8 @@ export default function WaferDetail({ waferId, onClose, onReviewed }) {
     let cancelled = false
     setWafer(null)
     setError(null)
+    setHeatmap('loading')
+    setAttempt(0)
     api
       .record(waferId)
       .then((data) => !cancelled && setWafer(data))
@@ -107,18 +113,47 @@ export default function WaferDetail({ waferId, onClose, onReviewed }) {
               </div>
 
               <div className="relative overflow-hidden rounded-lg bg-black">
-                {view !== 'heatmap' && <WaferMap map={wafer.wafer_map} />}
+                {/* 원본은 항상 렌더링해 박스 높이를 잡는다. 히트맵만 볼 때는 감추기만 한다.
+                    빼버리면 히트맵이 오기 전까지 높이가 0이라 화면이 튄다. */}
+                <div className={view === 'heatmap' ? 'invisible' : ''}>
+                  <WaferMap map={wafer.wafer_map} />
+                </div>
+
                 {view !== 'original' && (
                   <img
-                    src={api.heatmapUrl(waferId)}
+                    src={api.heatmapUrl(waferId, null, attempt)}
                     alt="Grad-CAM 히트맵"
-                    className="wafer-image w-full"
-                    style={
-                      view === 'overlay'
-                        ? { position: 'absolute', inset: 0, opacity: 0.85 }
-                        : undefined
-                    }
+                    onLoad={() => setHeatmap('ready')}
+                    onError={() => setHeatmap('error')}
+                    className={`wafer-image absolute inset-0 w-full transition-opacity duration-300 ${
+                      heatmap !== 'ready' ? 'opacity-0' : view === 'overlay' ? 'opacity-85' : ''
+                    }`}
                   />
+                )}
+
+                {/* 히트맵은 지연 생성이라 첫 요청에서 모델 로딩과 역전파가 함께 일어난다.
+                    몇 초가 걸리는데 표시가 없으면 고장난 것처럼 보인다. */}
+                {view !== 'original' && heatmap === 'loading' && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/70">
+                    <span className="h-7 w-7 animate-spin rounded-full border-2 border-line border-t-brand" />
+                    <p className="text-xs text-muted">히트맵 생성 중…</p>
+                    <p className="text-[11px] text-muted/70">처음 한 번은 몇 초 걸립니다</p>
+                  </div>
+                )}
+
+                {view !== 'original' && heatmap === 'error' && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/70 px-6 text-center">
+                    <p className="text-xs text-danger">히트맵을 생성하지 못했습니다</p>
+                    <button
+                      onClick={() => {
+                        setHeatmap('loading')
+                        setAttempt((count) => count + 1)
+                      }}
+                      className="text-xs text-brand underline underline-offset-2"
+                    >
+                      다시 시도
+                    </button>
+                  </div>
                 )}
               </div>
               <p className="mt-2 text-xs text-muted">

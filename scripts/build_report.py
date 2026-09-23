@@ -38,6 +38,29 @@ PANEL = colors.HexColor('#F1F5F9')
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / 'docs/WaferAI_진행보고서.pdf'
 GRADCAM = ROOT / 'docs/figures/gradcam_examples.png'
+UI_DIR = ROOT / 'docs/figures/ui'
+
+#: 부록 B 에 실을 화면. scripts/capture_screens.py 가 만든다.
+UI_SHOTS = [
+    ('01_login', '화면 1. 로그인',
+     '사번과 비밀번호로 인증한다. 실패 시 사번이 없는 경우와 비밀번호가 틀린 경우를 '
+     '구분하지 않는다.'),
+    ('02_dashboard', '화면 2. 메인 대시보드',
+     '상단 KPI 4종으로 처리 현황을 요약하고, 아래 카드 목록에서 개별 웨이퍼로 들어간다. '
+     '목록 썸네일은 모델을 거치지 않는 원본 렌더링이라 목록을 여는 비용이 낮다.'),
+    ('03_wafer_detail', '화면 3. 웨이퍼 상세 — Grad-CAM',
+     '좌측은 원본 / 히트맵 / 겹쳐보기 토글, 우측은 1순위 승인 · 2순위 수정 · 수동 라벨링 '
+     '세 경로다. 어느 경로로 확정해도 AI 원래 예측은 보존되고 검토 이력이 따로 쌓인다.'),
+    ('03b_heatmap_loading', '화면 3-1. 히트맵 생성 중',
+     '히트맵은 지연 생성이라 캐시가 없는 첫 요청에서 모델 적재와 역전파가 함께 일어난다. '
+     '몇 초가 걸리므로 진행 상태를 표시한다.'),
+    ('04_review_queue', '화면 4. 리뷰 대기열',
+     '확신도가 임계값에 못 미친 건만 모은 작업 큐. 클래스별 필터로 같은 유형을 묶어 '
+     '처리하면 맥락 전환 비용이 줄어든다.'),
+    ('05_settings', '화면 5. 판정 임계값 설정',
+     '수석 엔지니어 이상만 접근한다. 저밀도 규칙에는 본문 2.3 의 측정 근거를 경고로 '
+     '띄워, 이후에 무심코 켜지 않도록 했다.'),
+]
 
 styles = getSampleStyleSheet()
 
@@ -538,6 +561,24 @@ if GRADCAM.is_file():
     story.append(Spacer(1, 3 * mm))
     story.append(Image(str(GRADCAM), width=160 * mm, height=160 * mm * 520 / 946))
     story.append(P('합성 웨이퍼 4종 (Center · Donut · Edge-Ring · Scratch)', 'caption'))
+
+if UI_DIR.is_dir():
+    available = [item for item in UI_SHOTS if (UI_DIR / f'{item[0]}.png').is_file()]
+    if available:
+        story.append(PageBreak())
+        story.append(P('부록 B. 화면 구성', 'h1'))
+        story.append(P(
+            '실제 동작 화면이다. 로그인 후 메인 대시보드가 나오고, 헤더 아래 탭으로 다른 '
+            '화면으로 이동한다. 등급에 따라 탭 구성이 달라진다.'))
+        story.append(Spacer(1, 2 * mm))
+        # 페이지를 강제로 나누지 않는다. KeepTogether 로 제목·그림·설명만 붙여두면
+        # 들어가는 만큼 채워지고 남으면 다음 쪽으로 넘어간다.
+        for name, title, caption in available:
+            story.append(KeepTogether([
+                P(title, 'h2'),
+                Image(str(UI_DIR / f'{name}.png'), width=138 * mm, height=138 * mm * 900 / 1440),
+                P(caption, 'note'),
+            ]))
 
 # ── 문서 조립 ─────────────────────────────────────────────────────────────
 OUT.parent.mkdir(parents=True, exist_ok=True)
