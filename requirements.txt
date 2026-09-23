@@ -18,3 +18,6 @@ python-multipart>=0.0.9       # UploadFile 파싱
 # --- 테스트 ---
 httpx>=0.27                   # fastapi.testclient 의존성
 torchvision>=0.17             # 전처리 동등성 테스트의 기준 구현
+
+# --- 보고서 생성 (scripts/build_report.py) ---
+reportlab>=4.0
