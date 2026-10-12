@@ -1,0 +1,13 @@
+# HTTPS 전환용 덧씌움 설정. 기본 compose.yaml 위에 겹쳐 쓴다.
+#   docker compose -f compose.yaml -f compose.https.yaml up -d
+#
+# 인증서는 deploy/certbot/conf 에 있어야 한다 (deploy/README.md 의 "HTTPS" 절).
+
+services:
+  web:
+    ports:
+      - "${WEB_TLS_PORT:-443}:443"
+    volumes:
+      # 같은 대상 경로라 기본 설정의 default.conf 를 대체한다
+      - ./nginx/https.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certbot/conf:/etc/letsencrypt:ro

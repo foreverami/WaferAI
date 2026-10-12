@@ -1,0 +1,17 @@
+# API 이미지 빌드 컨텍스트. 허용 목록 방식이다 — 모두 막고 필요한 것만 연다.
+# 거부 목록 방식은 새 파일(.env, 가중치, 데이터)이 생길 때마다 빠뜨릴 위험이 있다.
+# 특히 .env 가 이미지에 들어가면 비밀값이 레이어에 영구히 남는다.
+*
+
+!waferai
+!alembic
+!alembic.ini
+!scripts/__init__.py
+!scripts/create_user.py
+!scripts/benchmark.py
+!deploy/entrypoint.sh
+!requirements.txt
+
+# 다시 연 디렉터리 안에서도 캐시는 뺀다 (이 규칙은 반드시 마지막에)
+**/__pycache__
+**/*.pyc

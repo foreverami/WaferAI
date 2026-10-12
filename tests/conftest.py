@@ -2,9 +2,15 @@
 
 모델 체크포인트를 매 테스트마다 올리면 느려서, 앱을 한 번 만들어 재사용하고
 DB 만 테스트마다 비운다.
+
+기본은 임시 SQLite 다. 운영과 같은 PostgreSQL 에서 돌리려면:
+    WAFERAI_TEST_DATABASE_URL=postgresql+psycopg://user:pw@host/db \
+        python3 -m unittest discover -s tests
+그 DB 의 테이블을 비우므로 운영 DB 를 가리키면 안 된다.
 """
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -46,7 +52,8 @@ class ApiTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls._folder = tempfile.TemporaryDirectory()
-        database_url = f'sqlite:///{Path(cls._folder.name) / "test.db"}'
+        database_url = (os.environ.get('WAFERAI_TEST_DATABASE_URL')
+                        or f'sqlite:///{Path(cls._folder.name) / "test.db"}')
         from waferai.server import create_app
 
         config = Settings(secret_key='test-only-secret-key-at-least-32-bytes-long', env='development',

@@ -10,3 +10,10 @@ data/
 *.sqlite3
 node_modules/
 frontend/dist/
+.DS_Store
+
+# 배포 — 운영 비밀값과 서버에서 생기는 파일
+deploy/.env
+deploy/backups/
+deploy/certbot/
+deploy/nginx/https.conf

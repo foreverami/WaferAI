@@ -3,9 +3,14 @@
 모델만 고치고 마이그레이션을 만들지 않으면, 개발에서는 create_all 이 알아서
 만들어줘서 멀쩡해 보이지만 운영에서는 컬럼이 없어 터진다. 이 테스트가 그 간극을
 배포 전에 잡는다.
+
+기본은 테스트마다 새 SQLite 파일이다. PostgreSQL 에서 돌리려면 비어 있어도 되는
+전용 DB 를 지정한다 (테스트마다 public 스키마를 통째로 지운다):
+    WAFERAI_TEST_MIGRATION_DATABASE_URL=postgresql+psycopg://... python3 -m unittest tests.test_migrations
 """
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,7 +19,7 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 
 from waferai.models import Base
 
@@ -36,7 +41,15 @@ class MigrationTests(unittest.TestCase):
     def setUp(self):
         self._folder = tempfile.TemporaryDirectory()
         self.addCleanup(self._folder.cleanup)
-        self.database_url = f'sqlite:///{Path(self._folder.name) / "migrate.db"}'
+        override = os.environ.get('WAFERAI_TEST_MIGRATION_DATABASE_URL')
+        if override:
+            # 마이그레이션은 빈 DB 에서 시작해야 의미가 있다. 매번 스키마를 새로 만든다.
+            engine = create_engine(override)
+            with engine.begin() as connection:
+                connection.execute(text('DROP SCHEMA IF EXISTS public CASCADE'))
+                connection.execute(text('CREATE SCHEMA public'))
+            engine.dispose()
+        self.database_url = override or f'sqlite:///{Path(self._folder.name) / "migrate.db"}'
         self.config = alembic_config(self.database_url)
 
     def test_upgrade_creates_every_table(self):

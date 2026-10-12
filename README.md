@@ -3,21 +3,24 @@
 WM-811K 로 학습한 CoAtNet-0 9클래스 분류기를 웹 서비스로 배포하는 프로젝트.
 Colab 학습 코드는 `training_reference.py` 에 보존돼 있다.
 
-현재 **Phase 4** 까지 완료: 공용 전처리 · 추론 백엔드 · 판정 로직 · 인증/권한 ·
-SQLAlchemy 모델 · Alembic 마이그레이션 · Grad-CAM · 검토 워크플로 · React 화면.
-Docker Compose 배포는 Phase 5.
+현재 **Phase 5** 까지 완료: 공용 전처리 · 추론 백엔드 · 판정 로직 · 인증/권한 ·
+SQLAlchemy 모델 · Alembic 마이그레이션 · Grad-CAM · 검토 워크플로 · React 화면 ·
+Docker Compose + Nginx 배포 구성. 서버 배포 절차는 [deploy/README.md](deploy/README.md).
 
 ## 설치
 
 ```sh
-python3 -m pip install -r requirements.txt
-cp .env.example .env          # 값을 채운다
+python3 -m pip install -r requirements-dev.txt   # 개발: 서버 의존성 + 테스트·평가 도구
+cp .env.example .env                              # 값을 채운다
 ```
+
+`requirements.txt` 는 서버 실행에 필요한 것만 담는다(배포 이미지가 이것을 쓴다).
+`tests/test_deploy.py` 가 이미지에 들어가는 코드의 import 를 모두 덮는지 검사한다.
 
 ## 실행
 
 ```sh
-python3 -m unittest discover -s tests -v       # 테스트 126개
+python3 -m unittest discover -s tests -v       # 테스트 156개
 python3 -m alembic upgrade head                # 스키마 생성/갱신
 python3 -m scripts.create_user --employee-id 202104346 --name 이름 \
     --email me@example.com --role admin        # 첫 관리자 (비밀번호는 실행 중 입력)
@@ -131,6 +134,15 @@ Vite + React 19 + React Router 7 + Tailwind 4. UIUX 문서 §5 의 컬러 토큰
 라우터 가드는 편의지 방어가 아니다. 실제 차단은 서버가 하며, 등급이 모자란 사용자가
 주소를 직접 쳐도 API 가 403 을 낸다.
 
+## 배포
+
+`deploy/` 에 Docker Compose 구성이 있다 — db(PostgreSQL 16) · api(FastAPI) · web(Nginx).
+절차·HTTPS·백업·문제 해결은 [deploy/README.md](deploy/README.md).
+
+```sh
+cd deploy && cp .env.example .env && docker compose up -d --build
+```
+
 ## 데이터베이스
 
 개발·테스트는 SQLite, 운영은 PostgreSQL. 같은 SQLAlchemy 모델이 양쪽에서 돌도록
@@ -142,6 +154,20 @@ python3 -m alembic revision --autogenerate -m "설명"    # 모델 수정 후 �
 ```
 
 `tests/test_migrations.py` 가 마이그레이션 결과와 모델 정의가 일치하는지 검사한다.
+
+SQLite 와 PostgreSQL 은 같은 스키마를 다르게 다룬다. 운영 DB 에서도 테스트를 돌릴 수 있다:
+
+```sh
+WAFERAI_TEST_DATABASE_URL=postgresql+psycopg://... \
+WAFERAI_TEST_MIGRATION_DATABASE_URL=postgresql+psycopg://.../별도DB \
+    python3 -m unittest discover -s tests
+```
+
+실제로 SQLite 에서는 보이지 않던 문제가 PostgreSQL 에서 하나 드러났다. `settings.key` 에
+기본키와 유니크 제약을 둘 다 걸었는데, PostgreSQL 은 테이블을 만들며 중복 제약을 합쳐
+기본키에 유니크의 이름(`uq_settings_key`)을 붙였다. 모델과 DB 가 영원히 어긋나고,
+그 이름으로 제약을 지우면 기본키가 지워지는 함정이었다. 마이그레이션 `3f2a9c1d7b84` 가
+실제 제약 종류를 확인한 뒤 DB 별로 정리한다.
 모델만 고치고 마이그레이션을 빼먹으면 개발에서는 `create_all` 이 덮어줘서 멀쩡해
 보이지만 운영에서 터지므로, 그 간극을 배포 전에 잡는다.
 

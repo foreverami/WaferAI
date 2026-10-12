@@ -1,11 +1,18 @@
-# WaferAI — Vision 파이프라인
-# 설치: python3 -m pip install -r requirements.txt
+# WaferAI — 서버 실행에 필요한 패키지 (배포 이미지에 들어가는 것)
+#   운영:  python3 -m pip install -r requirements.txt
+#   개발:  python3 -m pip install -r requirements-dev.txt   (이 파일을 포함한다)
+#
+# 리눅스에서는 torch / torchvision 을 CPU 전용 인덱스에서 먼저 받아야 한다.
+# PyPI 기본 휠은 CUDA 라이브러리를 수 GB 끌고 와서, GPU 가 없는 서버에는 낭비다.
+#   pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+# Dockerfile 이 이 순서를 지킨다. macOS 는 PyPI 휠이 이미 CPU 용이라 상관없다.
 
 # --- 전처리 / 추론 ---
 numpy>=1.26
-opencv-python-headless>=4.9   # 서버 배포용. 로컬 GUI가 필요하면 opencv-python 으로 교체
-onnxruntime>=1.17             # /predict 뜨거운 경로
-torch>=2.2                    # Grad-CAM 전용(지연 로딩) + ONNX 익스포트
+opencv-python-headless>=4.9   # GUI 의존성이 없는 서버용 빌드
+onnxruntime>=1.17             # /predict 경로
+torch>=2.2                    # Grad-CAM (지연 로딩)
+torchvision>=0.17             # timm 이 요구한다. 직접 쓰지 않아도 런타임에 필요
 timm>=1.0                     # coatnet_0_rw_224.sw_in1k 구조 생성
 
 # --- API ---
@@ -18,24 +25,9 @@ email-validator>=2.1          # pydantic EmailStr
 
 # --- 데이터베이스 ---
 SQLAlchemy>=2.0
-alembic>=1.13
-psycopg[binary]>=3.1          # 운영 PostgreSQL 드라이버. 개발 SQLite 는 표준 라이브러리
+alembic>=1.13                 # 컨테이너 기동 시 스키마를 맞춘다
+psycopg[binary]>=3.1          # PostgreSQL 드라이버. libpq 를 휠에 포함해 시스템 패키지가 필요 없다
 
 # --- 인증 ---
 PyJWT>=2.8
 bcrypt>=4.1
-
-# --- 개발 도구 (배포 이미지에는 불필요) ---
-# ONNX 익스포트: python3 -m scripts.export_onnx
-onnx>=1.16
-# 전처리 동등성 테스트의 기준 구현
-torchvision>=0.17
-# fastapi.testclient 의존성
-httpx>=0.27
-# 실데이터 평가: scripts/prepare_eval_set.py, scripts/evaluate.py
-pandas>=2.0
-scikit-learn>=1.3
-# 보고서 생성: scripts/build_report.py
-reportlab>=4.0
-# 화면 캡처: scripts/capture_screens.py (설치된 Chrome 사용, Chromium 불필요)
-playwright>=1.40

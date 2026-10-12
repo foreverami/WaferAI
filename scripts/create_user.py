@@ -13,6 +13,7 @@ import getpass
 import sys
 
 from sqlalchemy import select
+from sqlalchemy.engine import make_url
 
 from waferai.auth import hash_password
 from waferai.config import settings
@@ -64,7 +65,8 @@ def main() -> None:
         session.commit()
 
     print(f'\n생성 완료: {args.employee_id} ({args.name}, {args.role})')
-    print(f'  DB: {args.database_url}')
+    # 운영 접속 주소에는 DB 비밀번호가 들어 있다. 그대로 찍으면 터미널 기록과 로그에 남는다.
+    print(f'  DB: {make_url(args.database_url).render_as_string(hide_password=True)}')
 
 
 if __name__ == '__main__':

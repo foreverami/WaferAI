@@ -17,7 +17,7 @@ import enum
 from datetime import datetime, timezone
 
 from sqlalchemy import (JSON, Boolean, DateTime, Float, ForeignKey, Integer,
-                        String, Text, UniqueConstraint)
+                        String, Text)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -148,8 +148,11 @@ class Setting(Base):
     """
 
     __tablename__ = 'settings'
-    __table_args__ = (UniqueConstraint('key', name='uq_settings_key'),)
 
+    # 기본키가 이미 유일성을 보장하므로 별도 유니크 제약을 두지 않는다.
+    # 처음엔 uq_settings_key 를 함께 걸었는데, PostgreSQL 은 테이블을 만들 때 같은
+    # 컬럼의 중복 제약을 하나로 합쳐 기본키에 그 이름을 붙여버린다. SQLite 는 둘 다 남겨
+    # 개발 중에는 드러나지 않았다. 마이그레이션 3f2a9c1d7b84 가 이를 정리한다.
     key: Mapped[str] = mapped_column(String(40), primary_key=True)
     value: Mapped[dict] = mapped_column(JSON)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
