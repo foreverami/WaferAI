@@ -85,6 +85,15 @@ export const api = {
     return `/api/records/${id}/heatmap${query ? `?${query}` : ''}`
   },
 
+  models: () => request('/api/models'),
+  retrainOverview: () => request('/api/models/retrain'),
+  retrainJobs: () => request('/api/models/retrain/jobs'),
+  requestRetrain: () => request('/api/models/retrain', { method: 'POST' }),
+  failJob: (id, note) =>
+    request(`/api/models/retrain/jobs/${id}/fail`, { method: 'POST', body: { note } }),
+  // 학습 데이터는 파일이라 <a href download> 로 받는다. 쿠키는 같은 출처라 함께 간다.
+  datasetUrl: (id) => `/api/models/retrain/jobs/${id}/dataset`,
+
   thresholds: () => request('/api/settings/thresholds'),
   saveThresholds: (values) =>
     request('/api/settings/thresholds', { method: 'PUT', body: values }),

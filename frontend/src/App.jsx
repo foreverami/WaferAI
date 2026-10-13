@@ -5,6 +5,7 @@ import Layout from './components/Layout'
 import { Spinner } from './components/ui'
 import Dashboard from './pages/Dashboard'
 import Login from './pages/Login'
+import Models from './pages/Models'
 import ReviewQueue from './pages/ReviewQueue'
 import Settings from './pages/Settings'
 
@@ -52,6 +53,14 @@ export default function App() {
       >
         <Route index element={<Dashboard />} />
         <Route path="review" element={<ReviewQueue />} />
+        <Route
+          path="models"
+          element={
+            <RequireAuth minRole="senior_engineer">
+              <Models />
+            </RequireAuth>
+          }
+        />
         <Route
           path="settings"
           element={

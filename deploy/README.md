@@ -103,6 +103,30 @@ docker compose exec -T db pg_restore -U waferai -d waferai --clean --if-exists \
 
 히트맵은 다시 만들어지는 결과물이라 백업하지 않는다. 가중치는 원본이 Drive 에 있다.
 
+## 재학습으로 모델 바꾸기
+
+학습은 서버에서 하지 않는다 (CPU 서버에서는 며칠이 걸리고 그동안 추론이 멈춘다).
+전체 흐름과 판정 기준은 최상위 README 의 "재학습" 절.
+
+1. 검토가 500건 쌓이면 **모델 관리** 화면에 재학습 작업이 생긴다 (관리자가 먼저 요청할 수도 있다).
+2. 관리자가 **학습 데이터 내려받기** → 작업이 "학습 중"이 된다.
+3. GPU 에서 학습 — `python3 -m scripts.train --reviews <내려받은 파일> --init <직전 재학습 모델>`
+   (첫 재학습은 `--init` 없이 ImageNet 에서 시작한다)
+4. 개발 장비에서 판정·교체 — `python3 -m scripts.promote_model --candidate <model.pth> --apply`
+   - 거부되면 화면에서 작업을 **실패로 표시**하고 사유를 남긴다.
+5. 통과했으면 `models/` 의 두 파일을 서버로 옮기고 재시작한다.
+
+```sh
+scp models/best_coatnet_model_optimized.pth models/coatnet_wafer.onnx 서버:/경로/waferai/models/
+docker compose restart api        # 새 모델 등록 → 이전 모델 비활성 → 작업 자동 완료
+```
+
+되돌리기: `models/archive/<시각>/` 의 이전 파일을 다시 옮기고 재시작한다. 같은 가중치는 같은
+모델로 인식해 이력이 늘지 않고, 활성 모델은 언제나 하나다.
+
+`.pth` 만 옮기고 `.onnx` 를 빠뜨리면, 서버가 기동하며 짝이 안 맞는 것을 알아채고 PyTorch 로
+대신 돈다 (로그에 경고가 남는다). 그래도 두 파일을 함께 옮기는 것이 맞다.
+
 ## 업데이트
 
 ```sh
@@ -135,7 +159,7 @@ docker compose exec db psql -U waferai     # DB 직접 확인
 **검증함**
 
 - 런타임 의존성(`requirements.txt`)만 깐 새 환경에서 마이그레이션·기동·예측·히트맵까지 동작
-- PostgreSQL 16 에서 전체 테스트 156개 통과, 마이그레이션 왕복(올리기·되돌리기)
+- PostgreSQL 16 에서 전체 테스트 190개 통과, 마이그레이션 왕복(올리기·되돌리기)
 - `entrypoint.sh` 로 운영 모드 기동 — 마이그레이션 자동 적용, 모델 자동 등록, 운영 안전 점검
 - Nginx 설정 문법 — 공식 이미지와 같은 문맥(`http{}` 안 include)에서 파싱
 - CSP — Nginx 와 같은 헤더를 붙이는 대역 서버로 Chrome 에서 전 화면을 돌려 위반 0건

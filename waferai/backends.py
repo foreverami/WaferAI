@@ -8,6 +8,9 @@ tests/test_backend_parity.py 가 같은 입력에서 두 백엔드의 확률이 
 """
 from __future__ import annotations
 
+import hashlib
+import json
+import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 
@@ -17,6 +20,19 @@ CLASSES = ['Center', 'Donut', 'Edge-Loc', 'Edge-Ring', 'Loc',
            'Near-full', 'Random', 'Scratch', 'none']
 MODEL_NAME = 'coatnet_0_rw_224.sw_in1k'
 NUM_CLASSES = len(CLASSES)
+
+#: 체크포인트가 담을 수 있는 메타데이터. split_id 가 없으면 1학기 모델이다(테스트 셋 없음).
+METADATA_KEYS = ('epoch', 'val_acc', 'split_id', 'test_metrics')
+
+logger = logging.getLogger(__name__)
+
+
+def file_sha256(path) -> str:
+    digest = hashlib.sha256()
+    with open(path, 'rb') as handle:
+        for block in iter(lambda: handle.read(1 << 20), b''):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def softmax(logits: np.ndarray) -> np.ndarray:
@@ -40,7 +56,7 @@ def load_checkpoint(path) -> tuple[dict, dict]:
     checkpoint = torch.load(path, map_location='cpu', weights_only=True)
     if not isinstance(checkpoint, dict) or 'model_state_dict' not in checkpoint:
         raise ValueError('체크포인트에 model_state_dict 가 있어야 합니다')
-    metadata = {key: checkpoint.get(key) for key in ('epoch', 'val_acc')}
+    metadata = {key: checkpoint.get(key) for key in METADATA_KEYS}
     return checkpoint['model_state_dict'], metadata
 
 
@@ -97,7 +113,9 @@ class OnnxBackend(PredictorBackend):
         self.session = ort.InferenceSession(str(onnx_path), options,
                                             providers=['CPUExecutionProvider'])
         self.input_name = self.session.get_inputs()[0].name
-        self.metadata = _read_onnx_metadata(onnx_path)
+        # 메타데이터는 이미 연 세션에서 읽는다. 세션을 하나 더 열면 113MB 모델을 한 번 더
+        # 최적화하고 작업 스레드도 한 벌 더 생긴다.
+        self.metadata = _parse_onnx_metadata(self.session.get_modelmeta())
         self.source_path = onnx_path
 
     def probabilities(self, model_input: np.ndarray) -> np.ndarray:
@@ -105,19 +123,43 @@ class OnnxBackend(PredictorBackend):
         return softmax(logits[0])
 
 
-def _read_onnx_metadata(onnx_path: Path) -> dict:
-    """익스포트 때 심어둔 epoch / val_acc 를 읽는다."""
-    import onnxruntime as ort
-
-    raw = ort.InferenceSession(str(onnx_path),
-                               providers=['CPUExecutionProvider']).get_modelmeta()
+def _parse_onnx_metadata(raw) -> dict:
+    """익스포트 때 심어둔 메타데이터(ModelMetadata)를 파이썬 값으로 바꾼다."""
     custom = raw.custom_metadata_map or {}
-    epoch = custom.get('epoch')
-    val_acc = custom.get('val_acc')
+    epoch, val_acc, metrics = custom.get('epoch'), custom.get('val_acc'), custom.get('test_metrics')
     return {
         'epoch': int(epoch) if epoch is not None else None,
         'val_acc': float(val_acc) if val_acc is not None else None,
+        'split_id': custom.get('split_id'),
+        'test_metrics': json.loads(metrics) if metrics else None,
+        'source_sha256': custom.get('source_sha256'),
     }
+
+
+def _read_onnx_metadata(onnx_path: Path) -> dict:
+    """추론 없이 메타데이터만 필요할 때. 그래프 최적화를 끄고 열어 가볍게 읽는다."""
+    import onnxruntime as ort
+
+    options = ort.SessionOptions()
+    options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+    session = ort.InferenceSession(str(onnx_path), options, providers=['CPUExecutionProvider'])
+    return _parse_onnx_metadata(session.get_modelmeta())
+
+
+def _source_matches(metadata: dict, checkpoint) -> bool | None:
+    source = metadata.get('source_sha256')
+    if not source or not checkpoint or not Path(checkpoint).is_file():
+        return None
+    return source == file_sha256(checkpoint)
+
+
+def onnx_matches_checkpoint(onnx_path, checkpoint) -> bool | None:
+    """ONNX 가 지금의 .pth 에서 만들어졌는가. 만든 쪽 해시가 없으면(옛 익스포트) None.
+
+    .pth 만 새 모델로 바꾸고 .onnx 를 다시 만들지 않으면, ONNX 를 쓰는 서버는 옛 모델을
+    조용히 계속 낸다. 익스포트 때 원본 해시를 심어 두고 기동 시 대조한다.
+    """
+    return _source_matches(_read_onnx_metadata(Path(onnx_path)), checkpoint)
 
 
 def build_backend(checkpoint=None, onnx_path=None, prefer: str = 'auto',
@@ -129,10 +171,20 @@ def build_backend(checkpoint=None, onnx_path=None, prefer: str = 'auto',
     """
     if prefer not in ('auto', 'onnx', 'torch'):
         raise ValueError(f"prefer 는 auto/onnx/torch 중 하나여야 합니다 (현재 {prefer!r})")
-    if prefer == 'onnx':
-        return OnnxBackend(onnx_path)
     if prefer == 'torch':
         return TorchBackend(checkpoint, device)
-    if onnx_path and Path(onnx_path).is_file():
-        return OnnxBackend(onnx_path)
+
+    has_onnx = bool(onnx_path) and Path(onnx_path).is_file()
+    if prefer == 'onnx' or has_onnx:
+        backend = OnnxBackend(onnx_path)
+        if _source_matches(backend.metadata, checkpoint) is not False:
+            return backend
+        del backend
+        message = (f'{onnx_path} 가 지금의 {checkpoint} 에서 만들어지지 않았습니다. '
+                   '모델을 바꾼 뒤 ONNX 를 다시 만들지 않은 것으로 보입니다 '
+                   '(python3 -m scripts.export_onnx).')
+        if prefer == 'onnx':
+            raise RuntimeError(message)
+        # 원본(.pth)이 기준이다. 옛 ONNX 로 옛 모델을 내느니 느려도 맞는 쪽을 쓴다.
+        logger.warning('%s PyTorch 로 대신 실행합니다.', message)
     return TorchBackend(checkpoint, device)

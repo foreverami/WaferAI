@@ -33,6 +33,10 @@ class BackendParityTests(unittest.TestCase):
         cls.torch_backend = TorchBackend(CHECKPOINT)
         cls.onnx_backend = OnnxBackend(ONNX_MODEL)
 
+    @classmethod
+    def tearDownClass(cls):
+        del cls.torch_backend, cls.onnx_backend
+
     def test_probabilities_match(self):
         for wafer_map in sample_maps():
             model_input = to_model_input(wafer_map)

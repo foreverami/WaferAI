@@ -9,12 +9,13 @@ epoch / val_acc 는 ONNX 메타데이터에 심어 어느 체크포인트에서 
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import numpy as np
 
-from waferai.backends import (CLASSES, TorchBackend, load_checkpoint, build_torch_model,
-                              softmax)
+from waferai.backends import (CLASSES, TorchBackend, build_torch_model, file_sha256,
+                              load_checkpoint, softmax)
 from waferai.preprocess import to_model_input
 
 DEFAULT_CHECKPOINT = 'models/best_coatnet_model_optimized.pth'
@@ -62,7 +63,11 @@ def export(checkpoint: str, output: str) -> Path:
     for key, value in metadata.items():
         if value is not None:
             entry = proto.metadata_props.add()
-            entry.key, entry.value = key, str(value)
+            entry.key = key
+            entry.value = json.dumps(value) if isinstance(value, dict) else str(value)
+    # 원본 해시. 서버가 기동할 때 ONNX 와 .pth 가 짝이 맞는지 대조한다.
+    entry = proto.metadata_props.add()
+    entry.key, entry.value = 'source_sha256', file_sha256(checkpoint)
     entry = proto.metadata_props.add()
     entry.key, entry.value = 'classes', ','.join(CLASSES)
     onnx.save(proto, str(output_path))

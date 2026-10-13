@@ -74,15 +74,23 @@ class AiModel(Base):
     model_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     model_name: Mapped[str] = mapped_column(String(80))
     version: Mapped[str] = mapped_column(String(20))
-    # 모델 파일의 SHA-256. 같은 파일이 두 번 등록되지 않게 막는다.
+    # 가중치(.pth)의 SHA-256. 서빙을 ONNX 로 하든 PyTorch 로 하든 같은 가중치면 같은 모델이다.
     file_sha256: Mapped[str] = mapped_column(String(64), unique=True)
     backend: Mapped[str] = mapped_column(String(20))
     val_accuracy: Mapped[float | None] = mapped_column(Float, default=None)
     epoch: Mapped[int | None] = mapped_column(Integer, default=None)
+    # 학습에 쓴 고정 분할의 지문. 비어 있으면 1학기 모델 — 테스트 셋 없이 학습해
+    # 오염되지 않은 테스트 정확도가 없다.
+    split_id: Mapped[str | None] = mapped_column(String(32), default=None)
+    test_metrics: Mapped[dict | None] = mapped_column(JSON, default=None)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     deployed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     results: Mapped[list['WaferResult']] = relationship(back_populates='model')
+
+    @property
+    def has_clean_test(self) -> bool:
+        return bool(self.split_id and self.test_metrics)
 
 
 class WaferResult(Base):
@@ -158,6 +166,42 @@ class Setting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_by: Mapped[str | None] = mapped_column(
         ForeignKey('users.employee_id'), default=None)
+
+
+class RetrainStatus(str, enum.Enum):
+    PENDING = 'PENDING'        # 생성됨. 학습 데이터를 아직 아무도 내려받지 않았다
+    RUNNING = 'RUNNING'        # 학습 데이터를 내려받았다 — 오프라인에서 학습 중
+    COMPLETED = 'COMPLETED'    # 새 모델이 서버에 올라와 등록됐다
+    FAILED = 'FAILED'          # 학습 실패 또는 승격 기준 미달
+
+
+class RetrainJob(Base):
+    """재학습 작업 이력 — ERD 의 retrain_job.
+
+    학습 자체는 서버에서 돌리지 않는다. CPU 서버에서 CoAtNet 을 학습시키면 며칠이 걸리고
+    그동안 추론이 멈춘다. 서버는 작업을 기록하고 학습 데이터(검토 라벨)를 내주며,
+    학습된 모델이 올라오면 등록하고 작업을 끝낸다.
+    """
+
+    __tablename__ = 'retrain_job'
+
+    job_id: Mapped[str] = mapped_column(String(60), primary_key=True)
+    model_type: Mapped[str] = mapped_column(String(60), default='coatnet-0-finetune')
+    # AUTO_RETRAIN_500 이거나 요청한 관리자 사번. 자동은 사용자가 아니라 FK 로 묶지 않는다.
+    triggered_by: Mapped[str] = mapped_column(String(50))
+    status: Mapped[str] = mapped_column(String(20), default=RetrainStatus.PENDING.value)
+    # 이 시각까지의 검토가 이 작업의 학습 데이터다. 생성 시점에 고정한다.
+    review_cutoff: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # 직전 완료 작업 이후 새로 쌓인 검토 수 (트리거 근거)
+    new_reviews: Mapped[int] = mapped_column(Integer, default=0)
+    base_model_id: Mapped[int | None] = mapped_column(
+        ForeignKey('ai_model.model_id'), default=None)
+    result_model_id: Mapped[int | None] = mapped_column(
+        ForeignKey('ai_model.model_id'), default=None)
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
 
 THRESHOLDS_KEY = 'decision_thresholds'

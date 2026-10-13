@@ -17,3 +17,8 @@ deploy/.env
 deploy/backups/
 deploy/certbot/
 deploy/nginx/https.conf
+
+# 재학습 산출물
+runs/
+build/
+models/archive/

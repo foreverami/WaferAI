@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from waferai import retraining
 from waferai.auth import current_user, get_session, require_engineer
 from waferai.decision import Thresholds
 from waferai.heatmap import top_class
@@ -138,34 +139,36 @@ def detail(wafer_id: str, session: Session = Depends(get_session),
     return _detail(session, wafer_id)
 
 
-def _record_review(session: Session, wafer: WaferResult, label: str,
+def _record_review(request: Request, session: Session, wafer: WaferResult, label: str,
                    reviewer_id: str, memo: str) -> None:
     """검토 한 건을 쌓는다.
 
     원래 AI 예측은 건드리지 않는다. 나중에 모델 성능을 되짚으려면 AI 가 원래
     뭐라고 했는지가 남아 있어야 한다. 검토가 끝났으므로 대기열에서만 내린다.
+    검토가 쌓여 기준에 닿으면 재학습 작업을 만든다.
     """
     session.add(ReviewResult(wafer_id=wafer.wafer_id, final_class=label,
                              reviewer_id=reviewer_id, review_memo=memo))
     wafer.requires_human_review = False
     session.add(wafer)
     session.flush()
+    retraining.maybe_trigger(session, request.app.state.retrain_threshold)
 
 
 @router.post('/records/{wafer_id}/review', response_model=WaferDetail)
-def review(wafer_id: str, body: ReviewRequest,
+def review(request: Request, wafer_id: str, body: ReviewRequest,
            user: User = Depends(require_engineer),
            session: Session = Depends(get_session)):
     """수동 라벨링 — UIUX 문서의 드롭다운 경로."""
     wafer = session.get(WaferResult, wafer_id)
     if wafer is None:
         raise HTTPException(404, '기록이 없습니다')
-    _record_review(session, wafer, body.label, user.employee_id, body.memo)
+    _record_review(request, session, wafer, body.label, user.employee_id, body.memo)
     return _detail(session, wafer_id)
 
 
 @router.post('/records/{wafer_id}/approve', response_model=WaferDetail)
-def approve(wafer_id: str, body: ApproveRequest | None = None,
+def approve(request: Request, wafer_id: str, body: ApproveRequest | None = None,
             user: User = Depends(require_engineer),
             session: Session = Depends(get_session)):
     """AI 순위를 그대로 확정 — UIUX 문서의 '1순위 승인' 대형 버튼과 '2순위 수정' 링크.
@@ -182,7 +185,7 @@ def approve(wafer_id: str, body: ApproveRequest | None = None,
     if rank > len(ordered):
         raise HTTPException(422, f'{rank}순위가 없습니다')
 
-    _record_review(session, wafer, ordered[rank - 1][0], user.employee_id,
+    _record_review(request, session, wafer, ordered[rank - 1][0], user.employee_id,
                    body.memo if body else '')
     return _detail(session, wafer_id)
 

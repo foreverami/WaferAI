@@ -108,3 +108,50 @@ class ThresholdsIn(BaseModel):
 class ThresholdsOut(ThresholdsIn):
     updated_at: datetime | None = None
     updated_by: str | None = None
+
+
+class AiModelOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    model_id: int
+    model_name: str
+    version: str
+    file_sha256: str
+    backend: str
+    val_accuracy: float | None
+    epoch: int | None
+    split_id: str | None
+    test_metrics: dict | None
+    has_clean_test: bool
+    is_active: bool
+    deployed_at: datetime
+
+
+class RetrainJobOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    job_id: str
+    model_type: str
+    triggered_by: str
+    status: str
+    review_cutoff: datetime
+    new_reviews: int
+    base_model_id: int | None
+    result_model_id: int | None
+    note: str | None
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+
+
+class RetrainOverview(BaseModel):
+    threshold: int
+    new_reviews: int
+    ratio: float
+    since: str | None
+    active_job: RetrainJobOut | None
+    last_completed: RetrainJobOut | None
+
+
+class FailRequest(BaseModel):
+    note: str = Field(min_length=1, max_length=2000)

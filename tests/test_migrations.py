@@ -52,9 +52,17 @@ class MigrationTests(unittest.TestCase):
         self.database_url = override or f'sqlite:///{Path(self._folder.name) / "migrate.db"}'
         self.config = alembic_config(self.database_url)
 
+    def table_names(self) -> set[str]:
+        # 엔진을 닫지 않으면 연결이 남아, PostgreSQL 에서는 다음 테스트의 DROP SCHEMA 를 막는다.
+        engine = create_engine(self.database_url)
+        try:
+            return set(inspect(engine).get_table_names())
+        finally:
+            engine.dispose()
+
     def test_upgrade_creates_every_table(self):
         command.upgrade(self.config, 'head')
-        tables = set(inspect(create_engine(self.database_url)).get_table_names())
+        tables = self.table_names()
         self.assertTrue(EXPECTED_TABLES.issubset(tables),
                         f'누락된 테이블: {EXPECTED_TABLES - tables}')
 
@@ -66,6 +74,7 @@ class MigrationTests(unittest.TestCase):
         """
         command.upgrade(self.config, 'head')
         engine = create_engine(self.database_url)
+        self.addCleanup(engine.dispose)
         with engine.connect() as connection:
             context = MigrationContext.configure(
                 connection, opts={'compare_type': True})
@@ -79,7 +88,7 @@ class MigrationTests(unittest.TestCase):
         """되돌릴 수 없는 마이그레이션은 사고가 났을 때 손을 못 쓴다."""
         command.upgrade(self.config, 'head')
         command.downgrade(self.config, 'base')
-        tables = set(inspect(create_engine(self.database_url)).get_table_names())
+        tables = self.table_names()
         self.assertEqual(tables & EXPECTED_TABLES, set())
 
 

@@ -10,6 +10,7 @@ DB 만 테스트마다 비운다.
 """
 from __future__ import annotations
 
+import gc
 import os
 import tempfile
 import unittest
@@ -48,6 +49,8 @@ class ApiTestCase(unittest.TestCase):
     """로그인된 클라이언트를 제공하는 베이스 클래스."""
 
     client: TestClient
+    #: 하위 클래스가 설정을 바꿔 띄울 때 쓴다 (예: 재학습 기준을 3건으로)
+    settings_overrides: dict = {}
 
     @classmethod
     def setUpClass(cls):
@@ -57,13 +60,17 @@ class ApiTestCase(unittest.TestCase):
         from waferai.server import create_app
 
         config = Settings(secret_key='test-only-secret-key-at-least-32-bytes-long', env='development',
-                          database_url=database_url)
+                          database_url=database_url, **cls.settings_overrides)
         cls.client = TestClient(create_app(config, database_url=database_url))
         cls.client.__enter__()
 
     @classmethod
     def tearDownClass(cls):
         cls.client.__exit__(None, None, None)
+        # 클래스 속성으로 남은 앱이 ONNX 세션을 붙잡고 있으면, 클래스가 쌓일수록
+        # 세션 작업 스레드가 늘어 뒤쪽 테스트가 크게 느려진다.
+        del cls.client
+        gc.collect()
         cls._folder.cleanup()
 
     def setUp(self):

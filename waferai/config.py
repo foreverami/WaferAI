@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     device: str = 'cpu'                         # 배포 서버에 GPU 가 없다
     # Grad-CAM 결과 보관 위치. Phase 5 에서 Docker 볼륨으로 마운트한다.
     heatmap_dir: str = str(ROOT / 'data/heatmaps')
+    # 직전 재학습 이후 검토된 웨이퍼가 이만큼 쌓이면 재학습 작업을 만든다 (0 이면 자동 생성 끔).
+    retrain_threshold: int = 500
 
     @property
     def is_production(self) -> bool:

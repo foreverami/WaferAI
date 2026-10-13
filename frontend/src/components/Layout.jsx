@@ -11,6 +11,7 @@ import { ROLE_LABEL, useAuth } from '../auth'
 const TABS = [
   { to: '/', label: '대시보드', end: true },
   { to: '/review', label: '리뷰 대기열' },
+  { to: '/models', label: '모델 관리', minRole: 'senior_engineer' },
   { to: '/settings', label: '설정', minRole: 'senior_engineer' },
 ]
 
