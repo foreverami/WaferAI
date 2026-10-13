@@ -357,9 +357,12 @@ Near-full(테스트 14개)과 Donut(32개)은 데이터셋 자체가 작아 F1 �
 
 ```sh
 python3 -m scripts.build_colab_bundle      # → build/WaferAI_colab_bundle.zip (23MB)
+                                           #   build/colab_upload/ (9MB 조각 + 해시 + 노트북)
 ```
 
 zip 을 Drive 의 `MyDrive/WaferAI/` 에 올리고 `notebooks/retrain_colab.ipynb` 를 Colab 에서 연다.
+큰 파일을 한 번에 올리기 어려우면 `build/colab_upload/` 의 파일을 전부 올린다. 노트북이 조각을
+이어 붙이고 SHA-256 으로 원본과 같은지 확인한 뒤에만 학습으로 넘어간다.
 하이퍼파라미터는 1학기와 같고(배치 32, AdamW 5e-5, Focal Loss, AMP), 바뀐 것은 분할뿐이다.
 **ImageNet 가중치에서 시작한다.** 1학기 모델에서 이어 학습하면 그 모델이 이미 본 샘플이
 테스트 셋에 섞인다 — `scripts/train.py` 가 분할이 다른 가중치에서의 이어 학습을 거부한다.
