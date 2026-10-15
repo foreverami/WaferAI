@@ -11,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
+from tests.conftest import requires_trained_model
 from waferai.gradcam import GradCAM, find_target_layer, overlay_heatmap
 from waferai.preprocess import to_model_input, to_rgb, validate_map
 
@@ -61,6 +62,7 @@ class GradCamTests(unittest.TestCase):
         self.assertLessEqual(cam.max(), 1.0)
         self.assertIn(index, range(9))
 
+    @requires_trained_model
     def test_attention_follows_defect_geometry(self):
         """중앙 결함은 가운데, 링 결함은 가장자리, 도넛은 그 사이를 봐야 한다."""
         radii = {kind: mass_radius(self.cam(to_model_input(wafer(kind)))[0])
@@ -70,10 +72,12 @@ class GradCamTests(unittest.TestCase):
         self.assertLess(radii['donut'], radii['ring'],
                         f'Donut 이 Edge-Ring 보다 바깥을 본다: {radii}')
 
+    @requires_trained_model
     def test_center_defect_attention_is_actually_central(self):
         cam, _ = self.cam(to_model_input(wafer('center')))
         self.assertLess(mass_radius(cam), 0.6)
 
+    @requires_trained_model
     def test_edge_defect_attention_is_actually_peripheral(self):
         cam, _ = self.cam(to_model_input(wafer('ring')))
         self.assertGreater(mass_radius(cam), 0.7)

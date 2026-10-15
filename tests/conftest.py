@@ -27,6 +27,13 @@ from waferai.models import Base, User
 ROOT = Path(__file__).resolve().parent.parent
 CHECKPOINT = ROOT / 'models/best_coatnet_model_optimized.pth'
 
+#: GitHub Actions 에는 가중치가 없어 같은 구조의 무작위 가중치 모델(scripts/make_stand_in_model.py)로
+#: 돌린다. 전처리 → 추론 → 판정 → 저장 경로는 그대로 검사되지만, 예측 값 자체에 뜻이 있는
+#: 테스트(Grad-CAM 이 결함 위치를 가리키는지 등)는 학습된 모델에서만 의미가 있다.
+TRAINED_MODEL = CHECKPOINT.is_file() and not os.environ.get('WAFERAI_STAND_IN_MODEL')
+requires_trained_model = unittest.skipUnless(
+    TRAINED_MODEL, '학습된 모델이 필요합니다 (대역 모델 또는 모델 없음)')
+
 ADMIN = {'employee_id': 'A0001', 'password': 'admin-pass-1234'}
 SENIOR = {'employee_id': 'S0001', 'password': 'senior-pass-1234'}
 ENGINEER = {'employee_id': 'E0001', 'password': 'engineer-pass-1234'}

@@ -32,6 +32,18 @@ python3 -m scripts.create_user --employee-id 202104346 --name 이름 \
 python3 -m uvicorn waferai.server:app --host 127.0.0.1 --port 8000
 ```
 
+### 자동 테스트 (GitHub Actions)
+
+`main` 에 push 하거나 PR 을 열면 `.github/workflows/ci.yml` 이 돈다.
+
+* **백엔드** — 전체 테스트를 SQLite 와 PostgreSQL 16 에서 각각 돌린다.
+* **프론트엔드** — 린트 · 빌드, 그리고 빌드 결과에 인라인 스크립트가 없는지(CSP) 확인한다.
+
+모델 가중치는 저장소에 없으므로 CI 는 같은 구조의 무작위 가중치 모델을 만들어 쓴다
+(`python3 -m scripts.make_stand_in_model`). 전처리 → 추론 → 판정 → 저장 경로와 API · 인증 · DB 는
+그대로 검사된다. 예측 값에 뜻이 있는 테스트(Grad-CAM 이 결함 위치를 가리키는지 3건)만
+`WAFERAI_STAND_IN_MODEL=1` 일 때 건너뛰고, 실제 모델이 있는 개발 장비에서 돈다.
+
 프론트엔드는 따로 띄운다. 개발 중에는 Vite(5173)와 FastAPI(8000)가 다른 포트라
 쿠키가 오가지 않으므로, Vite 프록시가 같은 출처처럼 보이게 한다.
 

@@ -10,8 +10,9 @@ onnxscript>=0.1
 # 테스트 — fastapi.testclient 의존성
 httpx>=0.27
 
-# 배포 설정 검증: tests/test_deploy.py 가 Nginx 설정 문법을 확인한다
+# 배포 설정 검증: tests/test_deploy.py 가 Nginx 설정 문법과 compose.yaml 을 확인한다
 crossplane>=0.5
+PyYAML>=6.0                   # uvicorn[standard] 가 끌어오지만 테스트가 직접 쓰므로 명시한다
 
 # 실데이터 평가: scripts/prepare_eval_set.py, scripts/evaluate.py
 pandas>=2.0
