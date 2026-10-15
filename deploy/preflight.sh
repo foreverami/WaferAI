@@ -41,11 +41,15 @@ if [ -r /proc/meminfo ]; then
 else
     skip "메모리 확인 건너뜀 (/proc/meminfo 없음 — 리눅스 서버가 아님)"
 fi
+# 이미지 약 3GB + 빌드 중간 층 수 GB. 8GB 미만이면 빌드 도중 꽉 찰 수 있어 막고, 20GB 미만은 알리기만 한다.
+# DB 와 히트맵(장당 약 30KB)은 천천히 늘어난다. 권장은 50GB (deploy/README.md).
 disk_gb=$(df -Pk . | awk 'NR == 2 {printf "%d", $4 / 1024 / 1024}')
-if [ "$disk_gb" -ge 15 ]; then
-    ok "디스크 여유 ${disk_gb}GB"
+if [ "$disk_gb" -lt 8 ]; then
+    bad "디스크 여유 ${disk_gb}GB — 이미지와 빌드에 8GB 는 있어야 합니다"
+elif [ "$disk_gb" -lt 20 ]; then
+    skip "디스크 여유 ${disk_gb}GB — 뜨지만 빠듯합니다. 오래 운영하려면 20GB 이상 (권장 50GB)"
 else
-    bad "디스크 여유 ${disk_gb}GB — 이미지(약 3GB) · DB · 히트맵에 15GB 이상 필요합니다"
+    ok "디스크 여유 ${disk_gb}GB"
 fi
 cpus=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo '?')
 ok "CPU ${cpus}개 · $(uname -m)"
