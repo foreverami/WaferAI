@@ -1,7 +1,7 @@
 """계정 관리(admin)와 판정 임계값(senior 이상)."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -56,18 +56,27 @@ def deactivate_user(employee_id: str, session: Session = Depends(get_session),
     return user
 
 
+def _confidence_profile(request: Request) -> dict | None:
+    """운영 모델의 확신도 프로필 (테스트 셋에서 잰 분포). 재학습 파이프라인이 만든 모델에만 있다."""
+    predictor = getattr(request.app.state, 'predictor', None)
+    metrics = (predictor.metadata.get('test_metrics') if predictor else None) or {}
+    return metrics.get('confidence_profile')
+
+
 @router.get('/settings/thresholds', response_model=ThresholdsOut)
-def get_thresholds(session: Session = Depends(get_session),
+def get_thresholds(request: Request, session: Session = Depends(get_session),
                    _: User = Depends(require_senior)):
     row = session.get(Setting, THRESHOLDS_KEY)
     thresholds = load_thresholds(session)
     return ThresholdsOut(**thresholds.as_dict(),
                          updated_at=row.updated_at if row else None,
-                         updated_by=row.updated_by if row else None)
+                         updated_by=row.updated_by if row else None,
+                         confidence_profile=_confidence_profile(request))
 
 
 @router.put('/settings/thresholds', response_model=ThresholdsOut)
-def put_thresholds(body: ThresholdsIn, session: Session = Depends(get_session),
+def put_thresholds(body: ThresholdsIn, request: Request,
+                   session: Session = Depends(get_session),
                    user: User = Depends(require_senior)):
     try:
         thresholds = Thresholds(low_density=body.low_density,
@@ -75,6 +84,13 @@ def put_thresholds(body: ThresholdsIn, session: Session = Depends(get_session),
                                 confidence=body.confidence)
     except ValueError as error:
         raise HTTPException(422, str(error)) from error
+
+    # 모델이 낼 수 있는 최대 확신도보다 높은 임계값은 모든 웨이퍼를 검토로 보낸다.
+    # 설정 화면은 슬라이더 상한으로 막지만, API 로 직접 넣는 경우도 여기서 막는다.
+    profile = _confidence_profile(request)
+    if profile and body.confidence > profile['confidence_max']:
+        raise HTTPException(422, f"이 모델이 내는 확신도는 최대 {profile['confidence_max']:.2f} 입니다. "
+                                 '그보다 높이면 모든 웨이퍼가 검토로 가므로 받지 않습니다')
 
     row = session.get(Setting, THRESHOLDS_KEY)
     if row is None:
@@ -86,4 +102,4 @@ def put_thresholds(body: ThresholdsIn, session: Session = Depends(get_session),
     session.add(row)
     session.flush()
     return ThresholdsOut(**thresholds.as_dict(), updated_at=row.updated_at,
-                         updated_by=row.updated_by)
+                         updated_by=row.updated_by, confidence_profile=profile)

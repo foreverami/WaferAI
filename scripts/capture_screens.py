@@ -1,6 +1,6 @@
 """화면 스크린샷을 자동으로 찍어 docs/figures/ui/ 에 저장한다.
 
-    # 백엔드와 프론트엔드를 먼저 띄운 뒤
+    # 백엔드(python3 -m scripts.serve_preview)와 프론트엔드(npm run dev)를 먼저 띄운 뒤
     WAFERAI_CAPTURE_ID=E0001 WAFERAI_CAPTURE_PASSWORD=... python3 -m scripts.capture_screens
 
 보고서(scripts/build_report.py)의 부록 B 가 이 결과를 쓴다. 화면이 바뀌면 다시 돌려

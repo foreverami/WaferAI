@@ -105,9 +105,19 @@ class ThresholdsIn(BaseModel):
     confidence: float = Field(default=0.80, ge=0.0, le=1.0)
 
 
+class ConfidenceProfile(BaseModel):
+    """운영 모델이 테스트 셋에서 낸 확신도 분포. 설정 화면이 임계값의 효과를 미리 보여 준다."""
+
+    n: int
+    confidence_max: float
+    review_curve: list[tuple[float, float]]      # (임계값, 그 값에서 검토로 가는 비율)
+
+
 class ThresholdsOut(ThresholdsIn):
     updated_at: datetime | None = None
     updated_by: str | None = None
+    #: 재학습 파이프라인이 만든 모델에만 있다. 없으면 화면은 고정 상한(0.99)으로 돌아간다.
+    confidence_profile: ConfidenceProfile | None = None
 
 
 class AiModelOut(BaseModel):

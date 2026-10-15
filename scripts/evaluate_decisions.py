@@ -23,10 +23,12 @@ import numpy as np
 
 from scripts.evaluate import evaluate_decisions, measure_image_path
 from scripts.training_common import (CLASS_NAMES, DEFAULT_DATA, NONE_INDEX, balanced,
-                                     load_training_set, pick_device, probabilities)
+                                     confidence_profile, load_training_set, pick_device,
+                                     probabilities)
 from waferai.decision import Thresholds
 
 CHECKPOINT = 'models/best_coatnet_model_optimized.pth'
+ONNX = 'models/coatnet_wafer.onnx'
 CACHE = 'data/test_probs.npz'
 SWEEP = (0.50, 0.60, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95)
 
@@ -98,6 +100,32 @@ def load_probabilities(dataset, test: np.ndarray, device: str, batch_size: int, 
     return probs, model_sha
 
 
+def embed_profile(profile: dict, model_sha: str) -> None:
+    """운영 체크포인트의 test_metrics 에 확신도 프로필을 심고 ONNX 를 다시 만든다.
+
+    학습 스크립트가 만드는 모델은 evaluate_test 가 프로필을 넣으므로 이 단계가 필요 없다.
+    프로필 없이 배포된 모델(첫 재학습 모델)을 위한 한 번짜리 보정이다. 파일 해시가 바뀌므로
+    서버는 다음 기동 때 이를 새 버전으로 등록한다(가중치는 같다).
+    """
+    import torch
+
+    from scripts.export_onnx import export
+    from waferai.backends import file_sha256
+
+    path = Path(CHECKPOINT)
+    if file_sha256(path) != model_sha:
+        raise SystemExit('체크포인트가 확률 캐시를 만든 뒤 바뀌었습니다. 캐시를 지우고 다시 재세요.')
+    checkpoint = torch.load(path, map_location='cpu', weights_only=True)
+    test_metrics = dict(checkpoint.get('test_metrics') or {})
+    test_metrics['confidence_profile'] = profile
+    checkpoint['test_metrics'] = test_metrics
+    temp = path.with_name(path.name + '.tmp')
+    torch.save(checkpoint, temp)
+    temp.replace(path)
+    print(f'\n[프로필 심기] {path} → 새 해시 {file_sha256(path)[:12]} (가중치는 같다)')
+    export(str(path), ONNX)                      # .pth 만 바꾸면 서버가 짝 불일치로 거부한다
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description='판정 로직 효과 측정 (고정 테스트 셋)')
     parser.add_argument('--data', default=DEFAULT_DATA)
@@ -106,7 +134,11 @@ def main() -> None:
     parser.add_argument('--limit', type=int, help='테스트 표본 상한 (동작 확인용, 캐시하지 않음)')
     parser.add_argument('--image-check', type=int, default=300,
                         help='이미지 경로 비교 표본 수 (0 이면 생략)')
+    parser.add_argument('--embed-profile', action='store_true',
+                        help='확신도 프로필을 운영 체크포인트에 심고 ONNX 를 다시 만든다')
     args = parser.parse_args()
+    if args.embed_profile and args.limit:
+        raise SystemExit('--embed-profile 은 테스트 셋 전체로 잰 프로필만 심습니다 (--limit 제거)')
 
     os.environ.setdefault('PYTORCH_MPS_HIGH_WATERMARK_RATIO', '1.0')
     os.environ.setdefault('PYTORCH_MPS_LOW_WATERMARK_RATIO', '0.8')
@@ -125,6 +157,10 @@ def main() -> None:
     probs, model_sha = load_probabilities(dataset, test, device, args.batch_size,
                                           cache=not args.limit)
     print(f'  모델 {model_sha[:12]} · 정확도 {float((probs.argmax(1) == truth).mean()):.4f}')
+    profile = confidence_profile(probs)
+    curve = dict(profile['review_curve'])
+    print(f"  확신도 프로필: 최대 {profile['confidence_max']:.4f} · 임계값 0.90 이면 검토 "
+          f"{curve.get(0.9, 0):.1%} · 0.92 이면 {curve.get(0.92, 0):.1%}")
 
     views = {'실제 분포': np.arange(len(test)), '균형': rows}
 
@@ -162,6 +198,9 @@ def main() -> None:
         backend = TorchBackend(CHECKPOINT, device)
         measure_image_path(backend, [maps[i] for i in sample], truth[sample], CLASS_NAMES,
                            args.image_check)
+
+    if args.embed_profile:
+        embed_profile(profile, model_sha)
 
 
 if __name__ == '__main__':

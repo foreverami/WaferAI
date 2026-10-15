@@ -92,6 +92,28 @@ def metrics(true: np.ndarray, predicted: np.ndarray) -> dict:
     }
 
 
+#: 확신도 프로필을 재는 임계값 눈금 — 설정 화면 슬라이더와 같은 0.01 간격
+CONFIDENCE_GRID = [round(0.50 + 0.01 * step, 2) for step in range(50)]      # 0.50 … 0.99
+
+
+def confidence_profile(probs: np.ndarray) -> dict:
+    """모델이 내는 확신도의 분포 — 설정 화면이 임계값의 효과를 미리 보여 주는 데 쓴다.
+
+    review_curve 는 (임계값, 그 값 미만이라 검토로 가는 비율) 의 목록이다. 밀도 규칙은 빼고
+    확신도만 본 값이라 실제 검토율의 상한에 가깝다. confidence_max 를 넘는 임계값은 모든
+    웨이퍼를 검토로 보내므로 서버가 설정 상한으로 쓴다. Focal Loss 로 학습한 모델은
+    확신도가 좁은 구간(0.90 – 0.92)에 몰려, 이 곡선 없이는 임계값 0.05 차이가 검토량을
+    몇 배로 바꾸는 것을 알 수 없다.
+    """
+    top1 = probs.max(axis=1) if len(probs) else np.zeros(0)
+    return {
+        'n': int(len(top1)),
+        'confidence_max': round(float(top1.max()), 4) if len(top1) else 0.0,
+        'review_curve': [[threshold, round(float((top1 < threshold).mean()), 4)]
+                         for threshold in CONFIDENCE_GRID] if len(top1) else [],
+    }
+
+
 def evaluate_test(model, dataset: TrainingSet, device: str, seed: int = 7,
                   limit: int | None = None, batch_size: int = 32) -> dict:
     """고정 테스트 셋 평가. 두 가지로 잰다.
@@ -114,6 +136,8 @@ def evaluate_test(model, dataset: TrainingSet, device: str, seed: int = 7,
         'split_id': dataset.split_id,
         'balanced': metrics(true[rows], predicted[rows]),
         'natural': metrics(true, predicted),
+        # 실제 분포(테스트 셋 전체)에서 잰다 — 운영에서 들어오는 분포에 가장 가깝다
+        'confidence_profile': confidence_profile(probs),
     }
 
 

@@ -7,9 +7,31 @@ import { useEffect, useState } from 'react'
 import { api, formatPercent, formatTime } from '../api'
 import { ErrorNote, Spinner } from '../components/ui'
 
+// 모델에 확신도 프로필이 없을 때(1학기 모델)의 슬라이더 상한
+const CONFIDENCE_CEILING = 0.99
+// 이 비율이 넘는 웨이퍼가 검토로 가면 대기열이 감당하기 어렵다고 보고 경고한다
+const REVIEW_WARN = 0.2
+const REVIEW_DANGER = 0.5
+
+/**
+ * 임계값을 이 값으로 두면 테스트 셋에서 검토로 갔을 비율.
+ * 곡선은 0.01 간격이라 바로 아래 눈금의 값을 쓴다. 최대 확신도보다 높으면 전부 검토다.
+ */
+function reviewRateAt(profile, confidence) {
+  if (!profile) return null
+  if (confidence > profile.confidence_max) return 1
+  let rate = 0
+  for (const [threshold, value] of profile.review_curve) {
+    if (threshold > confidence + 1e-9) break
+    rate = value
+  }
+  return rate
+}
+
 export default function Settings() {
   const [values, setValues] = useState(null)
   const [meta, setMeta] = useState(null)
+  const [profile, setProfile] = useState(null)
   const [error, setError] = useState(null)
   const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -17,9 +39,10 @@ export default function Settings() {
   useEffect(() => {
     api
       .thresholds()
-      .then(({ updated_at, updated_by, ...rest }) => {
+      .then(({ updated_at, updated_by, confidence_profile, ...rest }) => {
         setValues(rest)
         setMeta({ updated_at, updated_by })
+        setProfile(confidence_profile)
       })
       .catch((caught) => setError(caught.detail || '설정을 불러오지 못했습니다'))
   }, [])
@@ -33,9 +56,10 @@ export default function Settings() {
     setBusy(true)
     setError(null)
     try {
-      const { updated_at, updated_by, ...rest } = await api.saveThresholds(values)
+      const { updated_at, updated_by, confidence_profile, ...rest } = await api.saveThresholds(values)
       setValues(rest)
       setMeta({ updated_at, updated_by })
+      setProfile(confidence_profile)
       setSaved(true)
     } catch (caught) {
       setError(caught.detail || '저장에 실패했습니다')
@@ -53,6 +77,11 @@ export default function Settings() {
       </div>
     )
   }
+
+  const confidenceMax = profile
+    ? Math.floor(profile.confidence_max * 100) / 100
+    : CONFIDENCE_CEILING
+  const reviewRate = reviewRateAt(profile, values.confidence)
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -79,7 +108,7 @@ export default function Settings() {
             id="confidence"
             type="range"
             min="0.5"
-            max="0.99"
+            max={confidenceMax}
             step="0.01"
             value={values.confidence}
             onChange={(event) => update({ confidence: Number(event.target.value) })}
@@ -89,6 +118,30 @@ export default function Settings() {
             이 값 미만이면 엔지니어 검토로 넘깁니다. 권장 75~85%. 높일수록 품질은
             올라가지만 검토 부담이 늘어납니다.
           </p>
+          {profile && (
+            <p className="mt-1.5 text-xs text-muted tabular-nums">
+              테스트 셋 {profile.n.toLocaleString()}건 기준 검토 대기 약{' '}
+              <span className={reviewRate >= REVIEW_WARN ? 'font-semibold text-warn' : 'text-ink'}>
+                {formatPercent(reviewRate, 1)}
+              </span>
+              {' '}· 이 모델의 확신도는 최대 {formatPercent(profile.confidence_max, 1)}라 슬라이더도
+              거기까지만 올라갑니다.
+            </p>
+          )}
+          {reviewRate !== null && reviewRate >= REVIEW_WARN && (
+            <div
+              className={`mt-2 rounded-lg border px-3 py-2 text-xs ${
+                reviewRate >= REVIEW_DANGER
+                  ? 'border-danger/40 bg-danger/10 text-danger'
+                  : 'border-warn/40 bg-warn/10 text-warn'
+              }`}
+            >
+              이 값이면 웨이퍼의 {formatPercent(reviewRate, 0)}가 검토 대기로 갑니다
+              {reviewRate >= REVIEW_DANGER ? ' — 대기열이 감당할 수 없습니다.' : '.'} 이 모델의
+              확신도는 대부분 90~92% 사이에 몰려 있어, 그 구간에서는 1%p 차이로 검토량이 몇 배씩
+              달라집니다.
+            </div>
+          )}
         </div>
 
         <div className="border-t border-line pt-5">
@@ -150,9 +203,10 @@ export default function Settings() {
             사용
           </label>
           <div className="mt-2 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">
-            검증 데이터 10,208건 측정 결과 이 규칙은 정확도를 떨어뜨렸습니다. 걸린 1,087건
-            중 291건이 실제로는 결함이었습니다(전체 정확도 96.45% → 93.78%). 켜지 않는
-            것을 권장합니다.
+            학습에 쓰지 않은 테스트 셋 17,504건에서 이 규칙을 켜면, 사람이 보지 않고
+            정상으로 나가는 결함이 19건에서 140건으로 늘었습니다. 얇은 Scratch 와 작은 Loc 은
+            결함 다이가 5% 미만이어도 명백한 결함인데, 픽셀을 세는 규칙은 패턴을 못 봅니다.
+            켜지 않는 것을 권장합니다.
           </div>
         </div>
       </div>

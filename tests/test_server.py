@@ -166,8 +166,13 @@ class ThresholdEffectTests(ApiTestCase):
     def test_threshold_change_affects_new_predictions(self):
         """설정 화면에서 바꾼 임계값이 실제 판정에 반영되어야 한다."""
         self.login(SENIOR)
-        self.client.put('/api/settings/thresholds',
-                        json={'confidence': 0.999, 'high_density': 0.8})
+        # 모델이 낼 수 있는 최대 확신도를 임계값으로 두면 사실상 전부 검토로 간다.
+        # 그보다 높은 값은 서버가 거부하므로(아래 ConfidenceProfileTests) 상한을 그대로 쓴다.
+        profile = self.client.get('/api/settings/thresholds').json()['confidence_profile']
+        ceiling = profile['confidence_max'] if profile else 0.999
+        response = self.client.put('/api/settings/thresholds',
+                                   json={'confidence': ceiling, 'high_density': 0.8})
+        self.assertEqual(response.status_code, 200, response.text)
         self.logout()
 
         self.login(ENGINEER)
@@ -182,6 +187,52 @@ class ThresholdEffectTests(ApiTestCase):
         self.logout()
         self.login(ADMIN)
         self.assertEqual(self.client.get('/api/settings/thresholds').json()['confidence'], 0.77)
+
+
+class ConfidenceProfileTests(ApiTestCase):
+    """모델의 확신도 분포를 설정 화면에 알려 주고, 모델 상한을 넘는 임계값은 받지 않는다."""
+
+    PROFILE = {'n': 1000, 'confidence_max': 0.95,
+               'review_curve': [[0.5, 0.01], [0.9, 0.1], [0.95, 0.99]]}
+
+    def setUp(self):
+        super().setUp()
+        # 어떤 모델이 떠 있든 같은 결과가 나오도록 프로필을 직접 꽂는다 (클래스마다 앱이 따로 뜬다).
+        # Predictor.metadata 는 부를 때마다 복사본을 만드므로 원본인 backend.metadata 를 고친다.
+        metadata = self.client.app.state.predictor.backend.metadata
+        self._original = metadata.get('test_metrics')
+        metadata['test_metrics'] = {**(self._original or {}), 'confidence_profile': self.PROFILE}
+        self.login(SENIOR)
+
+    def tearDown(self):
+        self.client.app.state.predictor.backend.metadata['test_metrics'] = self._original
+
+    def test_profile_is_reported_with_thresholds(self):
+        body = self.client.get('/api/settings/thresholds').json()
+        self.assertEqual(body['confidence_profile']['confidence_max'], 0.95)
+        self.assertEqual(body['confidence_profile']['review_curve'][1], [0.9, 0.1])
+
+    def test_threshold_above_model_ceiling_is_rejected(self):
+        response = self.client.put('/api/settings/thresholds',
+                                   json={'confidence': 0.96, 'high_density': 0.8})
+        self.assertEqual(response.status_code, 422)
+        self.assertIn('0.95', response.json()['detail'])
+        self.assertEqual(self.client.get('/api/settings/thresholds').json()['confidence'], 0.8)
+
+    def test_threshold_at_or_below_ceiling_is_accepted(self):
+        for confidence in (0.95, 0.9):
+            response = self.client.put('/api/settings/thresholds',
+                                       json={'confidence': confidence, 'high_density': 0.8})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()['confidence_profile']['confidence_max'], 0.95)
+
+    def test_without_profile_any_valid_threshold_is_accepted(self):
+        """1학기 모델처럼 프로필이 없으면 예전 그대로 0 ~ 1 안의 값을 다 받는다."""
+        self.client.app.state.predictor.backend.metadata['test_metrics'] = None
+        response = self.client.put('/api/settings/thresholds',
+                                   json={'confidence': 0.999, 'high_density': 0.8})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIsNone(response.json()['confidence_profile'])
 
 
 class PersistenceTests(ApiTestCase):

@@ -25,7 +25,7 @@ cp .env.example .env                              # 값을 채운다
 ## 실행
 
 ```sh
-python3 -m unittest discover -s tests -v       # 테스트 191개
+python3 -m unittest discover -s tests -v       # 테스트 197개
 python3 -m alembic upgrade head                # 스키마 생성/갱신
 python3 -m scripts.create_user --employee-id 202104346 --name 이름 \
     --email me@example.com --role admin        # 첫 관리자 (비밀번호는 실행 중 입력)
@@ -39,6 +39,10 @@ python3 -m uvicorn waferai.server:app --host 127.0.0.1 --port 8000
 npm --prefix frontend install
 npm --prefix frontend run dev        # http://127.0.0.1:5173
 ```
+
+화면만 빨리 확인하려면 관리자 계정을 만들 필요 없이 `python3 -m scripts.serve_preview` 로
+백엔드를 띄운다. 임시 DB 에 테스트 고정 계정 3개(tests/conftest.py)를 심어 두므로 로컬 밖에서는
+쓰면 안 된다.
 
 ```sh
 python3 -m scripts.export_onnx                 # .pth → .onnx (동등성 검증 포함)
@@ -456,8 +460,13 @@ python3 -m scripts.evaluate_decisions --device mps     # 확률은 모델 해시
 * 0.80 → 0.85 로 올리면 검토가 1.4%p 늘고, 정상으로 새는 결함이 19 → 12건으로 준다. 품질과
   업무량 사이의 선택이라 현장 기준으로 정할 일이다.
 * **0.92 를 넘기면 사실상 전부 검토로 간다.** 이 모델의 확신도는 대부분 0.90 – 0.92 에 몰려 있다
-  (Focal Loss 로 학습한 모델의 특성, 최댓값 0.97, 0.92 이상은 1.3%). 설정 화면은 0.99 까지
-  허용하므로 잘못 올리면 검토 대기열이 넘친다.
+  (Focal Loss 로 학습한 모델의 특성, 최댓값 0.97, 0.92 이상은 1.3%). 그래서 모델마다
+  **확신도 프로필**(테스트 셋에서 잰 최대 확신도와 임계값별 검토율 곡선)을 `test_metrics` 에
+  넣는다. 설정 화면은 슬라이더 상한을 모델의 최대 확신도에 맞추고, 값을 움직일 때 "테스트 셋
+  기준 검토 대기 약 X%" 를 보여 주며 20% 를 넘으면 경고한다. 서버는 최대 확신도보다 높은
+  임계값을 422 로 거부한다. 새로 학습하는 모델은 `evaluate_test` 가 프로필을 자동으로 넣고,
+  첫 재학습 모델에는 `scripts.evaluate_decisions --embed-profile` 로 심었다 (메타데이터만
+  바뀌어 파일 해시가 달라졌고, 가중치는 같다).
 
 **저밀도 규칙은 여전히 해롭다.** 켜면 결함을 정상으로 내보내는 건이 19 → 140건으로 7배가 된다.
 기본으로 꺼 둔 결정을 유지한다.

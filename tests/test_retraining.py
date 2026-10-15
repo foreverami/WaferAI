@@ -440,6 +440,30 @@ class TrainingCommonTests(unittest.TestCase):
         self.assertEqual(sorted(labels[chosen].tolist()).count(NONE_INDEX), 3)
         self.assertTrue({0, 1, 6} <= set(chosen.tolist()), '결함은 전부 들어가야 합니다')
 
+    def test_confidence_profile_gives_review_rate_per_threshold(self):
+        """임계값마다 '그 값 미만이라 검토로 가는 비율' 을 주고, 최대 확신도를 상한으로 알려 준다."""
+        from scripts.training_common import CONFIDENCE_GRID, confidence_profile
+
+        probs = np.array([[0.95, 0.05], [0.70, 0.30], [0.55, 0.45]])
+        profile = confidence_profile(probs)
+        curve = {threshold: rate for threshold, rate in profile['review_curve']}
+
+        self.assertEqual(profile['n'], 3)
+        self.assertAlmostEqual(profile['confidence_max'], 0.95)
+        self.assertEqual([t for t, _ in profile['review_curve']], CONFIDENCE_GRID)
+        self.assertEqual(curve[0.50], 0.0)                       # 셋 다 0.50 이상
+        self.assertAlmostEqual(curve[0.60], 1 / 3, places=3)     # 0.55 만 검토
+        self.assertAlmostEqual(curve[0.80], 2 / 3, places=3)     # 0.55, 0.70 검토
+        self.assertEqual(curve[0.99], 1.0)                       # 전부 검토
+        rates = [rate for _, rate in profile['review_curve']]
+        self.assertEqual(rates, sorted(rates), '임계값이 오르면 검토율은 내려갈 수 없다')
+
+    def test_confidence_profile_handles_empty_input(self):
+        from scripts.training_common import confidence_profile
+
+        profile = confidence_profile(np.zeros((0, 9)))
+        self.assertEqual((profile['n'], profile['confidence_max'], profile['review_curve']), (0, 0.0, []))
+
     def test_balanced_without_defects_is_an_integer_empty_array(self):
         """표본이 적어 결함이 0개면 빈 배열이 실수형이 되어 인덱싱이 터졌다 (승격 판정 중 발견)."""
         from scripts.training_common import NONE_INDEX, balanced
