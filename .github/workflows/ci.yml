@@ -109,3 +109,80 @@ jobs:
         run: |
           pip install PyYAML
           python -m unittest tests.test_deploy.FrontendBuildTests -v
+
+  deploy:
+    # 배포 구성을 실제 Docker 에서 검증한다 — 이미지 2개 빌드, compose 로 db · api · web 기동,
+    # Nginx 를 거쳐 로그인 · 예측 · 히트맵까지 호출. 개발 장비에 Docker 가 없어 여기서만 돌 수 있다.
+    name: 배포 구성 검증 (Docker Compose)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 운영 비밀값 (이 실행에서만 쓰는 일회용)
+        working-directory: deploy
+        run: |
+          cp .env.example .env
+          sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')|" .env
+          sed -i "s|^WAFERAI_SECRET_KEY=.*|WAFERAI_SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')|" .env
+
+      - name: API 이미지 빌드
+        working-directory: deploy
+        run: docker compose build api
+
+      - name: 대역 모델 생성 — 이미지 안의 torch 로 (러너에 파이썬 의존성을 깔지 않는다)
+        # 가중치는 저장소에 없다. 구조만 같은 무작위 가중치로 기동 · 예측 · 히트맵 경로를 돌린다.
+        run: |
+          mkdir -p models
+          docker run --rm --user root --entrypoint python -v "$PWD/models:/app/models" waferai-api -c "
+          import timm, torch
+          from waferai.backends import MODEL_NAME, NUM_CLASSES
+          torch.manual_seed(0)
+          model = timm.create_model(MODEL_NAME, pretrained=False, num_classes=NUM_CLASSES)
+          torch.save({'model_state_dict': model.state_dict()}, '/app/models/best_coatnet_model_optimized.pth')
+          print('대역 모델 저장')"
+          ls -la models
+
+      - name: 사전 점검 (deploy/preflight.sh)
+        working-directory: deploy
+        run: sh preflight.sh
+
+      - name: 기동 — 세 서비스가 healthy 가 될 때까지
+        working-directory: deploy
+        run: |
+          docker compose up -d --build
+          for i in $(seq 1 60); do
+            healthy=$(docker inspect --format '{{.State.Health.Status}}' $(docker compose ps -q) | grep -c '^healthy$' || true)
+            [ "$healthy" = "3" ] && break
+            sleep 5
+          done
+          docker compose ps
+          [ "$healthy" = "3" ]
+
+      - name: 첫 관리자 생성 — 운영 절차와 같은 명령 (비밀번호는 표준 입력으로)
+        working-directory: deploy
+        run: |
+          SMOKE_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
+          echo "::add-mask::$SMOKE_PASSWORD"
+          echo "SMOKE_PASSWORD=$SMOKE_PASSWORD" >> "$GITHUB_ENV"
+          printf '%s\n%s\n' "$SMOKE_PASSWORD" "$SMOKE_PASSWORD" | docker compose exec -T api \
+            python -m scripts.create_user --employee-id CI0001 --name CI --email ci@example.com --role admin
+
+      - name: 연기 테스트 — Nginx 를 거쳐 로그인 · 예측 · 히트맵까지
+        env:
+          SMOKE_ID: CI0001
+        run: sh deploy/smoke.sh http://localhost
+
+      - name: 메모리 사용량 (서버 사양을 정하는 근거)
+        if: always()
+        run: docker stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}\t{{.CPUPerc}}'
+
+      - name: 로그 (실패 시)
+        if: failure()
+        working-directory: deploy
+        run: docker compose logs --tail 200
+
+      - name: 정리
+        if: always()
+        working-directory: deploy
+        run: docker compose down -v

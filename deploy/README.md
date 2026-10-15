@@ -29,6 +29,24 @@ CPU 전용 torch 인덱스와 화면 빌드 도구가 두 아키텍처를 모두
 Docker Engine 과 Compose 플러그인이 필요하다. 설치는 공식 문서를 따른다:
 https://docs.docker.com/engine/install/
 
+### 학교 · 학과에 서버를 요청할 때 확인할 것
+
+| 항목 | 필요한 것 | 왜 |
+|---|---|---|
+| 사양 | 4 vCPU · 8GB RAM · 50GB 디스크 (최소 2 vCPU · 4GB) | PyTorch 적재 시 API 컨테이너가 1 – 2GB 를 쓴다 |
+| OS | Ubuntu 22.04 또는 24.04 LTS (x86_64 · ARM64 모두 가능) | Docker 공식 지원 |
+| 권한 | Docker 를 설치할 sudo, 또는 Docker 가 설치된 계정 | 컨테이너로 올린다 |
+| 네트워크 | 외부에서 80 · 443 포트 접근 (방화벽 · 보안그룹 열기) | 화면과 HTTPS |
+| 주소 | 고정 IP, 가능하면 도메인 (예: waferai.학교.ac.kr) | HTTPS 인증서(Let's Encrypt)는 도메인이 있어야 발급된다 |
+| 접속 | SSH 계정 (키 또는 비밀번호) | 배포와 운영 |
+| 외부 통신 | 서버에서 인터넷으로 나가는 통신 허용 | Docker 이미지 · 파이썬 패키지를 받는다 |
+| 데이터 | 웨이퍼 데이터를 서버에 저장해도 되는지 | 업로드한 웨이퍼 맵과 판정 결과가 DB 에 남는다 |
+| 기간 | 최종 발표(12/03) 이후까지 | 시연과 평가 |
+
+도메인이 없으면 HTTP 로만 쓸 수 있다. 그래도 `WAFERAI_COOKIE_SECURE=true` 를 유지하면 브라우저가
+로그인 쿠키를 저장하지 않으므로, 이 경우에만 `.env` 에서 `false` 로 바꾼다 — 로그인 정보가 평문으로
+오가므로 학내망 시연용으로만 쓴다.
+
 ## 처음 배포
 
 ```sh
@@ -46,15 +64,26 @@ python3 -c "import secrets; print(secrets.token_urlsafe(24))"   # → POSTGRES_P
 python3 -c "import secrets; print(secrets.token_urlsafe(48))"   # → WAFERAI_SECRET_KEY
 vi .env
 
-# 4. 기동 (첫 빌드는 torch 를 받느라 수 분 걸린다)
+# 4. 사전 점검 — 도구 · 메모리 · 디스크 · 모델 파일 · 비밀값 · 포트를 한 번에 본다
+sh preflight.sh
+
+# 5. 기동 (첫 빌드는 torch 를 받느라 수 분 걸린다)
 docker compose up -d --build
 docker compose ps                          # 세 서비스 모두 healthy 가 될 때까지
-curl http://localhost/healthz              # {"status":"ok","backend":"onnx"}
+sh smoke.sh http://localhost               # healthz · 화면 · 보안 헤더 · 인증 차단 확인
 
-# 5. 첫 관리자 — 비밀번호는 실행 중에 직접 입력한다 (인자로 넘기지 않는다)
+# 6. 첫 관리자 — 비밀번호는 실행 중에 직접 입력한다 (인자로 넘기지 않는다)
 docker compose exec api python -m scripts.create_user \
     --employee-id 사번 --name 이름 --email me@example.com --role admin
+
+# 7. 끝까지 확인 — 로그인 · 모델 상태 · 예측 · 히트맵 (첫 히트맵은 수십 초)
+SMOKE_ID=사번 SMOKE_PASSWORD=비밀번호 sh smoke.sh http://localhost
 ```
+
+같은 `smoke.sh` 를 GitHub Actions 가 push 마다 돌린다(`.github/workflows/ci.yml` 의 "배포 구성 검증").
+이미지를 빌드하고 compose 로 세 서비스를 띄워 Nginx 를 거쳐 히트맵까지 호출하므로, 서버에서
+처음 올릴 때 구성 자체가 틀릴 가능성은 낮다. 서버에서만 다를 수 있는 것은 방화벽 · 도메인 ·
+HTTPS 인증서 · 메모리 여유다.
 
 **ONNX 파일**: 서버 이미지에는 익스포트 도구(onnx)가 없다. 개발 장비에서
 `python3 -m scripts.export_onnx` 로 만들어 `models/` 에 함께 복사한다. 없으면 PyTorch 로
@@ -159,11 +188,14 @@ docker compose exec db psql -U waferai     # DB 직접 확인
 **검증함**
 
 - 런타임 의존성(`requirements.txt`)만 깐 새 환경에서 마이그레이션·기동·예측·히트맵까지 동작
-- PostgreSQL 16 에서 전체 테스트 190개 통과, 마이그레이션 왕복(올리기·되돌리기)
+- PostgreSQL 16 에서 전체 테스트 199개 통과, 마이그레이션 왕복(올리기·되돌리기)
 - `entrypoint.sh` 로 운영 모드 기동 — 마이그레이션 자동 적용, 모델 자동 등록, 운영 안전 점검
 - Nginx 설정 문법 — 공식 이미지와 같은 문맥(`http{}` 안 include)에서 파싱
 - CSP — Nginx 와 같은 헤더를 붙이는 대역 서버로 Chrome 에서 전 화면을 돌려 위반 0건
 - 빌드 컨텍스트 — `.dockerignore` 규칙이 `.env`·가중치·데이터를 막는지 (`tests/test_deploy.py`)
+- **실제 Docker 에서 전체 구성** (GitHub Actions, push 마다) — 이미지 2개 빌드, compose 로 db · api · web
+  기동, 세 서비스 healthy, `preflight.sh`, 운영 절차와 같은 명령으로 첫 관리자 생성, `smoke.sh` 로
+  Nginx 를 거쳐 로그인 · 모델 상태 · 예측 · 히트맵(PyTorch 적재)까지 호출. 가중치만 무작위 대역 모델이다
 
 **서버에서 처음 확인할 것 (Docker 필요)**
 
