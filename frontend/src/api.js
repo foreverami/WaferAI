@@ -94,6 +94,11 @@ export const api = {
   // 학습 데이터는 파일이라 <a href download> 로 받는다. 쿠키는 같은 출처라 함께 간다.
   datasetUrl: (id) => `/api/models/retrain/jobs/${id}/dataset`,
 
+  users: () => request('/api/users'),
+  createUser: (values) => request('/api/users', { method: 'POST', body: values }),
+  deactivateUser: (id) => request(`/api/users/${id}/deactivate`, { method: 'POST' }),
+  activateUser: (id) => request(`/api/users/${id}/activate`, { method: 'POST' }),
+
   thresholds: () => request('/api/settings/thresholds'),
   saveThresholds: (values) =>
     request('/api/settings/thresholds', { method: 'PUT', body: values }),

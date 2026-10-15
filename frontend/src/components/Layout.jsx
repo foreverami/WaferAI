@@ -13,6 +13,7 @@ const TABS = [
   { to: '/review', label: '리뷰 대기열' },
   { to: '/models', label: '모델 관리', minRole: 'senior_engineer' },
   { to: '/settings', label: '설정', minRole: 'senior_engineer' },
+  { to: '/account', label: '계정' },
 ]
 
 export default function Layout() {

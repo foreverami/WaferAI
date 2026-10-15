@@ -56,6 +56,19 @@ def deactivate_user(employee_id: str, session: Session = Depends(get_session),
     return user
 
 
+@router.post('/users/{employee_id}/activate', response_model=UserOut)
+def activate_user(employee_id: str, session: Session = Depends(get_session),
+                  _: User = Depends(require_admin)):
+    """비활성화를 되돌린다. 되돌릴 길이 없는 버튼은 화면에 두기 위험하다."""
+    user = session.get(User, employee_id)
+    if user is None:
+        raise HTTPException(404, '계정이 없습니다')
+    user.is_active = True
+    session.add(user)
+    session.flush()
+    return user
+
+
 def _confidence_profile(request: Request) -> dict | None:
     """운영 모델의 확신도 프로필 (테스트 셋에서 잰 분포). 재학습 파이프라인이 만든 모델에만 있다."""
     predictor = getattr(request.app.state, 'predictor', None)

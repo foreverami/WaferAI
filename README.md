@@ -25,7 +25,7 @@ cp .env.example .env                              # 값을 채운다
 ## 실행
 
 ```sh
-python3 -m unittest discover -s tests -v       # 테스트 197개
+python3 -m unittest discover -s tests -v       # 테스트 199개
 python3 -m alembic upgrade head                # 스키마 생성/갱신
 python3 -m scripts.create_user --employee-id 202104346 --name 이름 \
     --email me@example.com --role admin        # 첫 관리자 (비밀번호는 실행 중 입력)
@@ -143,6 +143,8 @@ Vite + React 19 + React Router 7 + Tailwind 4. UIUX 문서 §5 의 컬러 토큰
 | `/login` | 로그인 | — |
 | `/` | 대시보드 (KPI + 웨이퍼 카드) | engineer |
 | `/review` | 리뷰 대기열 | engineer |
+| `/account` | 계정 — 권한 배지 · 비밀번호 변경 · (관리자) 사용자 관리 | engineer |
+| `/models` | 모델 관리 — 운영 모델 · 재학습 작업 · 배포 이력 | senior_engineer |
 | `/settings` | 판정 임계값 | senior_engineer |
 
 상세 팝업은 원본 / 히트맵 / 겹쳐보기 토글과 1순위 승인 · 2순위 수정 · 수동 라벨링

@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useAuth } from './auth'
 import Layout from './components/Layout'
 import { Spinner } from './components/ui'
+import Account from './pages/Account'
 import Dashboard from './pages/Dashboard'
 import Login from './pages/Login'
 import Models from './pages/Models'
@@ -53,6 +54,7 @@ export default function App() {
       >
         <Route index element={<Dashboard />} />
         <Route path="review" element={<ReviewQueue />} />
+        <Route path="account" element={<Account />} />
         <Route
           path="models"
           element={

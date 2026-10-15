@@ -204,6 +204,28 @@ class RoleEnforcementTests(ApiTestCase):
         response = self.client.post(f"/api/users/{ADMIN['employee_id']}/deactivate")
         self.assertEqual(response.status_code, 422)
 
+    def test_deactivated_account_can_be_reactivated(self):
+        """비활성화는 되돌릴 수 있어야 한다. 그래야 화면에서 한 번 눌러도 사고가 아니다."""
+        self.login(ADMIN)
+        target = ENGINEER['employee_id']
+        self.assertEqual(self.client.post(f'/api/users/{target}/deactivate').status_code, 200)
+        self.logout()
+        response = self.client.post('/api/auth/login', json={
+            'employee_id': target, 'password': ENGINEER['password']})
+        self.assertEqual(response.status_code, 401)
+
+        self.login(ADMIN)
+        response = self.client.post(f'/api/users/{target}/activate')
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()['is_active'])
+        self.logout()
+        self.login(ENGINEER)                      # 다시 로그인된다 (login 이 200 을 확인한다)
+
+    def test_senior_cannot_reactivate(self):
+        self.login(SENIOR)
+        response = self.client.post(f"/api/users/{ENGINEER['employee_id']}/activate")
+        self.assertEqual(response.status_code, 403)
+
     def test_invalid_thresholds_rejected(self):
         self.login(SENIOR)
         response = self.client.put('/api/settings/thresholds',
