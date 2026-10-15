@@ -382,9 +382,6 @@ class StaleOnnxTests(unittest.TestCase):
         self.assertEqual(len(opened), 1)
 
 
-if __name__ == '__main__':
-    unittest.main()
-
 
 def scores(balanced: float, natural: float) -> dict:
     return {'balanced': {'macro_f1': balanced, 'accuracy': balanced, 'n': 100},
@@ -451,3 +448,32 @@ class TrainingCommonTests(unittest.TestCase):
         self.assertEqual(len(chosen), 0)
         self.assertEqual(chosen.dtype, np.int64)
         np.arange(4)[chosen]                                       # 인덱스로 쓸 수 있어야 한다
+
+
+class DecisionSummaryTests(unittest.TestCase):
+    """판정 효과 측정에서 틀린 무인 통과를 종류별로 센다 — 결함 누락이 가장 나쁘다."""
+
+    def test_wrong_unattended_results_are_split_by_kind(self):
+        from scripts.evaluate_decisions import summarize
+        from scripts.training_common import CLASS_NAMES, NONE_INDEX
+
+        center, scratch = CLASS_NAMES.index('Center'), CLASS_NAMES.index('Scratch')
+        decisions = [
+            {'final_class': 'none', 'decision_path': 'AUTO_PASS'},        # 결함을 정상으로
+            {'final_class': 'Scratch', 'decision_path': 'AUTO_PASS'},     # 결함 유형 틀림
+            {'final_class': 'Center', 'decision_path': 'AUTO_PASS'},      # 정상을 결함으로
+            {'final_class': 'Center', 'decision_path': 'AUTO_PASS'},      # 맞음
+            {'final_class': 'none', 'decision_path': 'REVIEW_NEEDED'},    # 틀렸지만 사람이 봄
+        ]
+        truth = np.array([center, center, NONE_INDEX, center, scratch])
+        s = summarize(decisions, truth)
+        self.assertEqual((s['missed_defect'], s['wrong_type'], s['false_alarm']), (1, 1, 1))
+        self.assertEqual(s['escaped'], 3)
+        self.assertEqual(s['review'], 1)
+        self.assertAlmostEqual(s['unattended'], 0.8)
+        self.assertEqual(s['review_ai_correct'], 0.0)
+        self.assertEqual(s['missed_by_class'], {'Center': 1})
+
+
+if __name__ == '__main__':
+    unittest.main()
