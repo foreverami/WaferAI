@@ -16,6 +16,7 @@ from unittest import mock
 import numpy as np
 
 from tests.conftest import ADMIN, ENGINEER, SENIOR, ApiTestCase
+from tests.optional import optional_dependency
 from waferai import retraining
 from waferai.models import AiModel, RetrainJob
 
@@ -325,11 +326,8 @@ class StaleOnnxTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        try:
-            import onnx
-            from onnx import TensorProto, helper
-        except ImportError:
-            raise unittest.SkipTest('onnx 가 없습니다 (requirements-dev.txt)')
+        onnx = optional_dependency('onnx')
+        from onnx import TensorProto, helper
         cls._folder = tempfile.TemporaryDirectory()
         folder = Path(cls._folder.name)
         cls.checkpoint = folder / 'model.pth'

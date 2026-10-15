@@ -9,7 +9,7 @@
   * 업로드 상한 불일치 — Nginx 가 먼저 HTML 413 을 내 화면이 오류를 못 읽는다
   * SPA 새로고침 404, 컨테이너 재시작 후 502 (Nginx 가 옛 IP 를 붙잡고 있음)
 
-crossplane(Nginx 파서)과 docker(빌드 컨텍스트 계산)가 없으면 해당 검사만 건너뛴다.
+crossplane(Nginx 파서)과 docker(빌드 컨텍스트 계산)가 없으면 해당 검사만 건너뛴다 (CI 에서는 실패).
 """
 from __future__ import annotations
 
@@ -23,6 +23,8 @@ import unittest
 from pathlib import Path
 
 import yaml
+
+from tests.optional import optional_dependency
 
 ROOT = Path(__file__).resolve().parent.parent
 DEPLOY = ROOT / 'deploy'
@@ -171,10 +173,8 @@ class BuildContextTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        try:
-            from docker.utils.build import exclude_paths
-        except ImportError:
-            raise unittest.SkipTest('docker 패키지가 없습니다 (requirements-dev.txt)')
+        # .dockerignore 규칙만 계산한다 — Docker 데몬은 필요 없다
+        exclude_paths = optional_dependency('docker.utils.build').exclude_paths
 
         cls._tree = tempfile.TemporaryDirectory()
         tree = Path(cls._tree.name)
@@ -316,10 +316,7 @@ def find(block: list[dict], name: str) -> list[dict]:
 class NginxTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        try:
-            import crossplane  # noqa: F401
-        except ImportError:
-            raise unittest.SkipTest('crossplane 이 없습니다 (requirements-dev.txt)')
+        optional_dependency('crossplane')
         cls.payloads = {conf.name: parse_like_image(conf) for conf in SITE_CONFIGS}
 
     def test_configs_parse_without_errors(self):
