@@ -1,6 +1,6 @@
 """계정 생성 CLI — 첫 관리자를 만들 때 쓴다.
 
-    python3 -m scripts.create_user --employee-id 202104346 --name 조원곤 \
+    python3 -m scripts.create_user --employee-id E0001 --name 이름 \
         --email me@example.com --role admin
 
 비밀번호는 인자로 받지 않는다. 명령행 인자는 셸 히스토리와 프로세스 목록(ps)에

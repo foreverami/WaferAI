@@ -27,7 +27,7 @@ cp .env.example .env                              # 값을 채운다
 ```sh
 python3 -m unittest discover -s tests -v       # 테스트 199개
 python3 -m alembic upgrade head                # 스키마 생성/갱신
-python3 -m scripts.create_user --employee-id 202104346 --name 이름 \
+python3 -m scripts.create_user --employee-id E0001 --name 이름 \
     --email me@example.com --role admin        # 첫 관리자 (비밀번호는 실행 중 입력)
 python3 -m uvicorn waferai.server:app --host 127.0.0.1 --port 8000
 ```
