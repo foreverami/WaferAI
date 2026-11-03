@@ -101,6 +101,7 @@ export const api = {
   createUser: (values) => request('/api/users', { method: 'POST', body: values }),
   deactivateUser: (id) => request(`/api/users/${id}/deactivate`, { method: 'POST' }),
   activateUser: (id) => request(`/api/users/${id}/activate`, { method: 'POST' }),
+  resetPassword: (id) => request(`/api/users/${id}/reset-password`, { method: 'POST' }),
 
   thresholds: () => request('/api/settings/thresholds'),
   saveThresholds: (values) =>

@@ -38,7 +38,7 @@ COPY --chown=waferai:waferai waferai/ waferai/
 COPY --chown=waferai:waferai alembic/ alembic/
 COPY --chown=waferai:waferai alembic.ini ./
 # 서버에서 쓰는 운영 스크립트만 넣는다. 나머지는 개발 의존성이 필요하다.
-COPY --chown=waferai:waferai scripts/__init__.py scripts/create_user.py scripts/benchmark.py scripts/
+COPY --chown=waferai:waferai scripts/__init__.py scripts/create_user.py scripts/reset_password.py scripts/benchmark.py scripts/
 COPY --chown=waferai:waferai deploy/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # 히트맵 저장 위치. 이름 있는 볼륨은 처음 붙을 때 이 디렉터리의 소유자를 물려받으므로,

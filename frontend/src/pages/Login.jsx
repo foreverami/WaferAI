@@ -86,6 +86,10 @@ export default function Login() {
             가입 신청
           </Link>
         </p>
+        <p className="mt-2 text-center text-xs text-muted">
+          비밀번호를 잊으셨나요? 관리자에게 초기화를 요청하세요. 임시 비밀번호를 받은 뒤 계정
+          탭에서 바꾸면 됩니다.
+        </p>
       </div>
     </div>
   )

@@ -301,6 +301,45 @@ class SignupTests(ApiTestCase):
         self.assertEqual(self.client.post('/api/auth/register', json=taken_email).status_code, 409)
 
 
+class PasswordResetTests(ApiTestCase):
+    """관리자가 임시 비밀번호를 발급한다. 메일 없이 쓰는 비밀번호 찾기다."""
+
+    def test_admin_reset_gives_a_working_temporary_password(self):
+        self.login(ADMIN)
+        response = self.client.post(f"/api/users/{ENGINEER['employee_id']}/reset-password")
+        self.assertEqual(response.status_code, 200, response.text)
+        temporary = response.json()['temporary_password']
+        self.assertGreaterEqual(len(temporary), 12)
+        self.assertNotIn('password_hash', response.text)
+        self.logout()
+
+        # 옛 비밀번호는 더 못 쓰고 임시 비밀번호로 들어간다
+        old = self.client.post('/api/auth/login', json={
+            'employee_id': ENGINEER['employee_id'], 'password': ENGINEER['password']})
+        self.assertEqual(old.status_code, 401)
+        self.login({'employee_id': ENGINEER['employee_id'], 'password': temporary})
+
+    def test_two_resets_give_different_passwords(self):
+        self.login(ADMIN)
+        first = self.client.post(f"/api/users/{ENGINEER['employee_id']}/reset-password").json()
+        second = self.client.post(f"/api/users/{ENGINEER['employee_id']}/reset-password").json()
+        self.assertNotEqual(first['temporary_password'], second['temporary_password'])
+
+    def test_admin_cannot_reset_own_password_here(self):
+        self.login(ADMIN)
+        response = self.client.post(f"/api/users/{ADMIN['employee_id']}/reset-password")
+        self.assertEqual(response.status_code, 422)
+
+    def test_senior_cannot_reset_passwords(self):
+        self.login(SENIOR)
+        response = self.client.post(f"/api/users/{ENGINEER['employee_id']}/reset-password")
+        self.assertEqual(response.status_code, 403)
+
+    def test_unknown_account_is_404(self):
+        self.login(ADMIN)
+        self.assertEqual(self.client.post('/api/users/NOPE/reset-password').status_code, 404)
+
+
 class ValidationMessageTests(ApiTestCase):
     """입력 검증 실패는 어느 항목이 왜 틀렸는지 한국어 한 줄로 알려줘야 한다."""
 

@@ -216,6 +216,8 @@ function UserAdmin({ me }) {
   const [formError, setFormError] = useState(null)
   const [created, setCreated] = useState(null)
   const [busy, setBusy] = useState(null) // 처리 중인 사번 또는 'create'
+  const [confirmReset, setConfirmReset] = useState(null) // 초기화 확인 중인 사번
+  const [issued, setIssued] = useState(null) // { employee_id, temporary_password } — 한 번만 보여 준다
 
   // 효과 안에서 상태를 동기적으로 바꾸지 않는다. 오류 초기화도 응답이 온 뒤에 한다.
   const load = () => {
@@ -240,6 +242,22 @@ function UserAdmin({ me }) {
                                : await api.activateUser(target.employee_id))
     } catch (caught) {
       setError(caught.detail || '상태를 바꾸지 못했습니다')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // 임시 비밀번호는 이 응답에만 실린다. 화면에서 닫으면 다시 볼 수 없으니 관리자가 바로 전달해야 한다.
+  const resetPassword = async (target) => {
+    setBusy(target.employee_id)
+    setError(null)
+    try {
+      const result = await api.resetPassword(target.employee_id)
+      setIssued(result)
+      setConfirmReset(null)
+      replace({ ...target, password_changed_at: new Date().toISOString() })
+    } catch (caught) {
+      setError(caught.detail || '비밀번호를 초기화하지 못했습니다')
     } finally {
       setBusy(null)
     }
@@ -283,12 +301,31 @@ function UserAdmin({ me }) {
       <div>
         <h3 className="text-lg font-semibold">사용자 · 권한 관리</h3>
         <p className="text-sm text-muted">
-          관리자만 볼 수 있습니다. 로그인 화면에서 들어온 가입 신청은 여기서 승인합니다. 계정을 지우는
-          대신 비활성화합니다 — 그 사람이 남긴 검토 이력은 그대로 남아야 합니다.
+          관리자만 볼 수 있습니다. 로그인 화면에서 들어온 가입 신청은 여기서 승인하고, 비밀번호를 잊은
+          사람에게는 임시 비밀번호를 만들어 줍니다. 계정을 지우는 대신 비활성화합니다 — 그 사람이 남긴
+          검토 이력은 그대로 남아야 합니다.
         </p>
       </div>
 
       <ErrorNote onRetry={load}>{error}</ErrorNote>
+
+      {issued && (
+        <div className="rounded-lg border border-brand/40 bg-brand/10 px-4 py-3 text-sm">
+          <p>
+            <span className="font-mono">{issued.employee_id}</span> 의 임시 비밀번호:{' '}
+            <code className="rounded bg-panel px-2 py-0.5 font-mono text-base text-ink select-all">
+              {issued.temporary_password}
+            </code>
+          </p>
+          <p className="mt-1 text-xs text-muted">
+            지금 한 번만 보입니다. 본인에게 전달하고 로그인 후 계정 탭에서 바꾸게 하세요. 옛 비밀번호는 더
+            쓸 수 없습니다.
+          </p>
+          <button onClick={() => setIssued(null)} className="mt-2 text-xs text-muted underline underline-offset-2">
+            닫기
+          </button>
+        </div>
+      )}
 
       {users && users.some((item) => item.is_pending) && (
         <div className="rounded-lg border border-warn/40 bg-warn/10 px-4 py-3 text-sm text-warn">
@@ -339,7 +376,28 @@ function UserAdmin({ me }) {
                       )}
                     </td>
                     <td className="px-4 py-3 text-xs tabular-nums">{formatTime(item.password_changed_at)}</td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      {!self && !item.is_pending && (
+                        confirmReset === item.employee_id ? (
+                          <span className="mr-2 inline-flex items-center gap-1 text-xs">
+                            <span className="text-muted">초기화?</span>
+                            <button onClick={() => resetPassword(item)} disabled={busy === item.employee_id}
+                                    className="rounded border border-warn/40 px-2 py-1 text-warn hover:bg-warn/10 disabled:opacity-40">
+                              {busy === item.employee_id ? '…' : '예'}
+                            </button>
+                            <button onClick={() => setConfirmReset(null)}
+                                    className="rounded border border-line px-2 py-1 text-muted hover:text-ink">
+                              아니요
+                            </button>
+                          </span>
+                        ) : (
+                          <button onClick={() => setConfirmReset(item.employee_id)} disabled={busy === item.employee_id}
+                                  title="임시 비밀번호를 만들어 보여 줍니다"
+                                  className="mr-2 rounded-lg border border-line px-3 py-1.5 text-xs text-muted transition-colors hover:border-warn/50 hover:text-warn disabled:opacity-40">
+                            비밀번호 초기화
+                          </button>
+                        )
+                      )}
                       <button
                         onClick={() => toggleActive(item)}
                         disabled={self || busy === item.employee_id}

@@ -109,6 +109,13 @@ class WaferDetail(WaferSummary):
     heatmap_path: str | None = None
 
 
+class TemporaryPassword(BaseModel):
+    """관리자가 초기화한 임시 비밀번호. 이 응답에만 한 번 실리고 어디에도 저장되지 않는다."""
+
+    employee_id: str
+    temporary_password: str
+
+
 class ThresholdsIn(BaseModel):
     """None 은 해당 규칙을 끈다는 뜻이다."""
 

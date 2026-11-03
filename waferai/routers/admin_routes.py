@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+import secrets
+
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -10,7 +12,7 @@ from waferai.auth import get_session, hash_password, require_admin, require_seni
 from waferai.decision import Thresholds
 from waferai.models import Setting, THRESHOLDS_KEY, User, utcnow
 from waferai.routers.wafer_routes import load_thresholds
-from waferai.schemas import ThresholdsIn, ThresholdsOut, UserCreate, UserOut
+from waferai.schemas import TemporaryPassword, ThresholdsIn, ThresholdsOut, UserCreate, UserOut
 
 router = APIRouter(prefix='/api', tags=['admin'])
 
@@ -54,6 +56,28 @@ def deactivate_user(employee_id: str, session: Session = Depends(get_session),
     session.add(user)
     session.flush()
     return user
+
+
+@router.post('/users/{employee_id}/reset-password', response_model=TemporaryPassword)
+def reset_password(employee_id: str, session: Session = Depends(get_session),
+                   admin: User = Depends(require_admin)):
+    """비밀번호를 잊은 사용자에게 임시 비밀번호를 만들어 준다.
+
+    메일 발송 없이 쓰는 방식이다(공장 내부 시스템, 서버에 메일 설정 없음). 임시 비밀번호는 이
+    응답에만 실리고 서버에는 해시만 남는다. 관리자가 본인에게 전달하고, 본인은 로그인 뒤 계정
+    탭에서 바꾼다. 자기 계정은 여기서 바꾸지 않는다 — 비밀번호 변경 화면이 따로 있다.
+    """
+    if employee_id == admin.employee_id:
+        raise HTTPException(422, '자기 비밀번호는 계정 탭의 비밀번호 변경에서 바꾸세요')
+    user = session.get(User, employee_id)
+    if user is None:
+        raise HTTPException(404, '계정이 없습니다')
+    temporary = 'Wafer-' + secrets.token_urlsafe(9)            # 약 12자, 영문 · 숫자 · - _
+    user.password_hash = hash_password(temporary)
+    user.password_changed_at = utcnow()
+    session.add(user)
+    session.flush()
+    return TemporaryPassword(employee_id=employee_id, temporary_password=temporary)
 
 
 @router.post('/users/{employee_id}/activate', response_model=UserOut)

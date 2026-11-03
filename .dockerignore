@@ -8,6 +8,7 @@
 !alembic.ini
 !scripts/__init__.py
 !scripts/create_user.py
+!scripts/reset_password.py
 !scripts/benchmark.py
 !deploy/entrypoint.sh
 !requirements.txt
