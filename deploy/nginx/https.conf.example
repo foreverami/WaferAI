@@ -11,6 +11,12 @@ server {
         root /var/www/certbot;
     }
 
+    # 컨테이너 상태 검사용. 80 은 리다이렉트만 하므로 / 로 검사하면 늘 실패한다.
+    location = /nginx-health {
+        access_log off;
+        return 200;
+    }
+
     location / {
         return 301 https://$host$request_uri;
     }

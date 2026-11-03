@@ -120,6 +120,20 @@ docker compose -f compose.yaml -f compose.https.yaml up -d
 
 HTTPS 를 켠 뒤로는 `docker compose` 명령마다 `-f compose.yaml -f compose.https.yaml` 를 붙인다.
 
+## 현재 배포 (2026-11-03)
+
+| 항목 | 값 |
+|---|---|
+| 주소 | https://waferai-demo.eastasia.cloudapp.azure.com |
+| 서버 | Azure for Students · East Asia(홍콩) · Standard_B2als_v2 (2 vCPU · 4GB) · Ubuntu 24.04 |
+| 접속 | `ssh waferai-vm` (개발 장비 `~/.ssh/config` 에 등록, 키 `~/.ssh/waferai_azure`) |
+| 코드 위치 | 서버의 `~/waferai` — `git archive` 로 복사한 소스 (git 메타데이터 없음) |
+| 인증서 | Let's Encrypt, 매주 월요일 04:00 자동 갱신 (crontab) |
+| 실측 | 세 서비스 healthy, `smoke.sh` 8단계 통과, 히트맵 첫 생성 6초, API 메모리 1.05GB |
+
+학생 크레딧 $100 은 월 약 $30 씩 줄어 2027년 1월 중순쯤 끝난다. 그 뒤에는 VM 이 멈춘다(청구 없음).
+코드를 고친 뒤 반영하려면 "업데이트" 절을 따른다.
+
 ## 백업과 복원
 
 ```sh
