@@ -1,0 +1,110 @@
+[
+ {
+  "file": "auto_Center_21431",
+  "label": "Center",
+  "shape": [
+   101,
+   103
+  ],
+  "note": "확신도 0.924 → 자동 통과 기대"
+ },
+ {
+  "file": "auto_Donut_24419",
+  "label": "Donut",
+  "shape": [
+   37,
+   31
+  ],
+  "note": "확신도 0.881 → 자동 통과 기대"
+ },
+ {
+  "file": "auto_Edge-Loc_21598",
+  "label": "Edge-Loc",
+  "shape": [
+   72,
+   44
+  ],
+  "note": "확신도 0.933 → 자동 통과 기대"
+ },
+ {
+  "file": "auto_Edge-Ring_6791",
+  "label": "Edge-Ring",
+  "shape": [
+   34,
+   34
+  ],
+  "note": "확신도 0.917 → 자동 통과 기대"
+ },
+ {
+  "file": "auto_Loc_11105",
+  "label": "Loc",
+  "shape": [
+   52,
+   59
+  ],
+  "note": "확신도 0.929 → 자동 통과 기대"
+ },
+ {
+  "file": "auto_Near-full_31980",
+  "label": "Near-full",
+  "shape": [
+   26,
+   26
+  ],
+  "note": "확신도 0.911 → 자동 통과 기대"
+ },
+ {
+  "file": "auto_Random_32808",
+  "label": "Random",
+  "shape": [
+   26,
+   26
+  ],
+  "note": "확신도 0.933 → 자동 통과 기대"
+ },
+ {
+  "file": "auto_Scratch_22185",
+  "label": "Scratch",
+  "shape": [
+   95,
+   100
+  ],
+  "note": "확신도 0.933 → 자동 통과 기대"
+ },
+ {
+  "file": "auto_none_16723",
+  "label": "none",
+  "shape": [
+   155,
+   175
+  ],
+  "note": "확신도 0.933 → 자동 통과 기대"
+ },
+ {
+  "file": "review_Loc_21258",
+  "label": "Loc",
+  "shape": [
+   51,
+   50
+  ],
+  "note": "확신도 0.452 → 검토 대기 기대"
+ },
+ {
+  "file": "review_Edge-Ring_172936",
+  "label": "Edge-Ring",
+  "shape": [
+   26,
+   30
+  ],
+  "note": "확신도 0.458 → 검토 대기 기대"
+ },
+ {
+  "file": "nearfull_Near-full_31980",
+  "label": "Near-full",
+  "shape": [
+   26,
+   26
+  ],
+  "note": "결함 밀도 1.00 → 규칙 확정 기대"
+ }
+]

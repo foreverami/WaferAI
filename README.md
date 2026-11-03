@@ -169,6 +169,20 @@ Vite + React 19 + React Router 7 + Tailwind 4. UIUX 문서 §5 의 컬러 토큰
 라우터 가드는 편의지 방어가 아니다. 실제 차단은 서버가 하며, 등급이 모자란 사용자가
 주소를 직접 쳐도 API 가 403 을 낸다.
 
+## 전체 기능 점검 (실서버)
+
+```sh
+ACC_ENG=사번:비밀번호 ACC_SEN=사번:비밀번호 ACC_ADM=사번:비밀번호 \
+    python3 -m scripts.acceptance --base https://서버 --samples samples
+```
+
+`samples/` 는 학습에 쓰지 않은 테스트 분할에서 고른 실제 WM-811K 웨이퍼 12벌(클래스별 자동 통과 · 검토
+대기 · Near-full 규칙)을 npy · csv · json · png 네 형식으로 둔 것과, 거절돼야 하는 입력(다른 색상표 ·
+깨진 파일 · 잘못된 값 · 900px 이미지)이다. 시연용 업로드 파일로도 쓴다. 점검 스크립트는 로그인 없이
+되는 것부터 업로드 · 판정 · 히트맵 · 검토 세 경로 · 임계값 · 모델 관리 · 계정 · 가입 승인 · 비밀번호
+초기화 · 재학습 요청 · 동시 업로드까지 65항목을 호출해 표로 보고한다. 기록이 남으므로 점검용 계정으로
+돌린다. 2026-11-03 운영 서버에서 65/65 통과.
+
 ## 배포
 
 `deploy/` 에 Docker Compose 구성이 있다 — db(PostgreSQL 16) · api(FastAPI) · web(Nginx).
