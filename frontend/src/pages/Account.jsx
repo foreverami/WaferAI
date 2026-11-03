@@ -283,12 +283,19 @@ function UserAdmin({ me }) {
       <div>
         <h3 className="text-lg font-semibold">사용자 · 권한 관리</h3>
         <p className="text-sm text-muted">
-          관리자만 볼 수 있습니다. 계정을 지우는 대신 비활성화합니다 — 그 사람이 남긴 검토 이력은
-          그대로 남아야 합니다.
+          관리자만 볼 수 있습니다. 로그인 화면에서 들어온 가입 신청은 여기서 승인합니다. 계정을 지우는
+          대신 비활성화합니다 — 그 사람이 남긴 검토 이력은 그대로 남아야 합니다.
         </p>
       </div>
 
       <ErrorNote onRetry={load}>{error}</ErrorNote>
+
+      {users && users.some((item) => item.is_pending) && (
+        <div className="rounded-lg border border-warn/40 bg-warn/10 px-4 py-3 text-sm text-warn">
+          가입 신청 {users.filter((item) => item.is_pending).length}건이 승인을 기다립니다. 아래 표에서
+          확인하고 승인하세요. 승인하면 엔지니어 권한으로 로그인할 수 있습니다.
+        </div>
+      )}
 
       {users === null ? (
         !error && <Spinner />
@@ -310,7 +317,7 @@ function UserAdmin({ me }) {
               </tr>
             </thead>
             <tbody>
-              {users.map((item) => {
+              {[...users].sort((a, b) => Number(b.is_pending) - Number(a.is_pending)).map((item) => {
                 const self = item.employee_id === me.employee_id
                 return (
                   <tr key={item.employee_id} className={`border-t border-line ${item.is_active ? '' : 'text-muted'}`}>
@@ -323,7 +330,13 @@ function UserAdmin({ me }) {
                     <td className="px-4 py-3 text-xs">{item.department || '-'}</td>
                     <td className="px-4 py-3"><RoleBadge role={item.role} /></td>
                     <td className="px-4 py-3 text-xs">
-                      {item.is_active ? <span className="text-pass">사용 중</span> : <span className="text-danger">비활성</span>}
+                      {item.is_pending ? (
+                        <span className="font-medium text-warn">승인 대기</span>
+                      ) : item.is_active ? (
+                        <span className="text-pass">사용 중</span>
+                      ) : (
+                        <span className="text-danger">비활성</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-xs tabular-nums">{formatTime(item.password_changed_at)}</td>
                     <td className="px-4 py-3 text-right">
@@ -337,7 +350,13 @@ function UserAdmin({ me }) {
                             : 'border-pass/40 text-pass hover:bg-pass/10'
                         }`}
                       >
-                        {busy === item.employee_id ? '처리 중…' : item.is_active ? '비활성화' : '다시 활성화'}
+                        {busy === item.employee_id
+                          ? '처리 중…'
+                          : item.is_pending
+                            ? '승인'
+                            : item.is_active
+                              ? '비활성화'
+                              : '다시 활성화'}
                       </button>
                     </td>
                   </tr>

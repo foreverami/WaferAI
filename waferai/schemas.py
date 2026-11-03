@@ -36,6 +36,16 @@ class UserCreate(BaseModel):
     password: str = Field(min_length=8, max_length=256)
 
 
+class SignupRequest(BaseModel):
+    """가입 신청. 권한은 고를 수 없고(항상 engineer), 관리자가 승인해야 로그인할 수 있다."""
+
+    employee_id: str = Field(min_length=1, max_length=20)
+    name: str = Field(min_length=1, max_length=50)
+    email: EmailStr
+    department: str | None = Field(default=None, max_length=50)
+    password: str = Field(min_length=8, max_length=256)
+
+
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -45,6 +55,8 @@ class UserOut(BaseModel):
     department: str | None
     role: str
     is_active: bool
+    is_pending: bool = False          # 가입 신청 뒤 승인 대기
+    approved_at: datetime | None = None
     password_changed_at: datetime
 
 

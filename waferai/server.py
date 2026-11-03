@@ -93,6 +93,7 @@ def create_app(config: Settings | None = None, *, database_url: str | None = Non
                                      config.access_token_minutes)
         app.state.predict_lock = Lock()
         app.state.retrain_threshold = config.retrain_threshold
+        app.state.allow_signup = config.allow_signup
 
         checkpoint = Path(config.checkpoint_path)
         if not checkpoint.is_absolute():

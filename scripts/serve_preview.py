@@ -18,7 +18,7 @@ from tests.conftest import ADMIN, ENGINEER, SENIOR
 from waferai.auth import hash_password
 from waferai.config import Settings
 from waferai.db import create_all, create_db_engine, create_session_factory
-from waferai.models import User
+from waferai.models import User, utcnow
 from waferai.server import create_app
 
 HOST, PORT = '127.0.0.1', 8000
@@ -33,7 +33,7 @@ def seed(database_url: str) -> None:
         for account, role, name in ACCOUNTS:
             session.add(User(employee_id=account['employee_id'], name=name,
                              email=f"{account['employee_id']}@example.com", role=role,
-                             password_hash=hash_password(account['password'])))
+                             approved_at=utcnow(), password_hash=hash_password(account['password'])))
         session.commit()
     engine.dispose()
 

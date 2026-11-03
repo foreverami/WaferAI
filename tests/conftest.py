@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 from waferai.auth import hash_password
 from waferai.config import Settings
 from waferai.image_adapter import encode_png, render_wafer_map
-from waferai.models import Base, User
+from waferai.models import Base, User, utcnow
 
 ROOT = Path(__file__).resolve().parent.parent
 CHECKPOINT = ROOT / 'models/best_coatnet_model_optimized.pth'
@@ -96,7 +96,7 @@ class ApiTestCase(unittest.TestCase):
                                         (ENGINEER, 'engineer', '엔지니어')):
                 session.add(User(employee_id=account['employee_id'], name=name,
                                  email=f"{account['employee_id']}@example.com",
-                                 role=role,
+                                 role=role, approved_at=utcnow(),      # 관리자가 만든 계정
                                  password_hash=hash_password(account['password'])))
             session.commit()
 

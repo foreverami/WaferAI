@@ -9,6 +9,7 @@ import Login from './pages/Login'
 import Models from './pages/Models'
 import ReviewQueue from './pages/ReviewQueue'
 import Settings from './pages/Settings'
+import Signup from './pages/Signup'
 
 /**
  * 로그인 문지기.
@@ -44,6 +45,10 @@ export default function App() {
       <Route
         path="/login"
         element={!checking && user ? <Navigate to="/" replace /> : <Login />}
+      />
+      <Route
+        path="/signup"
+        element={!checking && user ? <Navigate to="/" replace /> : <Signup />}
       />
       <Route
         element={

@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     heatmap_dir: str = str(ROOT / 'data/heatmaps')
     # 직전 재학습 이후 검토된 웨이퍼가 이만큼 쌓이면 재학습 작업을 만든다 (0 이면 자동 생성 끔).
     retrain_threshold: int = 500
+    # 로그인 화면의 가입 신청. 신청된 계정은 관리자가 승인해야 로그인할 수 있다. 끄면 관리자만 계정을 만든다.
+    allow_signup: bool = True
 
     @property
     def is_production(self) -> bool:

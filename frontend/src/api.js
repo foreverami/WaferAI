@@ -49,6 +49,7 @@ export const api = {
     request('/api/auth/login', { method: 'POST', body: { employee_id: employeeId, password } }),
   logout: () => request('/api/auth/logout', { method: 'POST' }),
   me: () => request('/api/auth/me'),
+  register: (values) => request('/api/auth/register', { method: 'POST', body: values }),
   changePassword: (currentPassword, newPassword) =>
     request('/api/auth/password', {
       method: 'POST',

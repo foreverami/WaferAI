@@ -28,7 +28,7 @@ def create_user(body: UserCreate, session: Session = Depends(get_session),
     try:
         user = User(employee_id=body.employee_id, name=body.name, email=body.email,
                     department=body.department, role=body.role,
-                    password_hash=hash_password(body.password))
+                    password_hash=hash_password(body.password), approved_at=utcnow())
     except ValueError as error:
         raise HTTPException(422, str(error)) from error
 
@@ -59,11 +59,13 @@ def deactivate_user(employee_id: str, session: Session = Depends(get_session),
 @router.post('/users/{employee_id}/activate', response_model=UserOut)
 def activate_user(employee_id: str, session: Session = Depends(get_session),
                   _: User = Depends(require_admin)):
-    """비활성화를 되돌린다. 되돌릴 길이 없는 버튼은 화면에 두기 위험하다."""
+    """비활성화를 되돌린다. 가입 신청 계정에는 이것이 곧 승인이다."""
     user = session.get(User, employee_id)
     if user is None:
         raise HTTPException(404, '계정이 없습니다')
     user.is_active = True
+    if user.approved_at is None:
+        user.approved_at = utcnow()
     session.add(user)
     session.flush()
     return user

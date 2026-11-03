@@ -57,6 +57,9 @@ class User(Base):
     password_changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
                                                           default=utcnow)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # 관리자가 승인(또는 직접 생성)한 시각. 비어 있고 비활성이면 가입 신청 뒤 승인 대기 상태다.
+    # 기본값을 두지 않는다 — 가입 신청은 반드시 비어 있어야 하고, 관리자 생성은 명시적으로 채운다.
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     reviews: Mapped[list['ReviewResult']] = relationship(back_populates='reviewer')
@@ -64,6 +67,11 @@ class User(Base):
     @property
     def role_enum(self) -> Role:
         return Role(self.role)
+
+    @property
+    def is_pending(self) -> bool:
+        """가입 신청 뒤 아직 승인되지 않음. 관리자가 비활성화한 계정과 구분된다."""
+        return not self.is_active and self.approved_at is None
 
 
 class AiModel(Base):

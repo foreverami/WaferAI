@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../auth'
 import { ErrorNote } from '../components/ui'
@@ -79,6 +79,13 @@ export default function Login() {
             {busy ? '확인 중…' : '로그인'}
           </button>
         </form>
+
+        <p className="mt-6 text-center text-sm text-muted">
+          계정이 없으신가요?{' '}
+          <Link to="/signup" className="text-brand underline underline-offset-2">
+            가입 신청
+          </Link>
+        </p>
       </div>
     </div>
   )

@@ -102,11 +102,16 @@ class LoginTests(ApiTestCase):
         self.assertEqual(unknown.json()['detail'], wrong.json()['detail'])
 
     def test_deactivated_account_cannot_log_in(self):
+        """비밀번호까지 맞은 본인에게는 403 으로 상태를 알려준다. 틀리면 여느 때처럼 401 이다."""
         self.login(ADMIN)
         self.client.post(f"/api/users/{ENGINEER['employee_id']}/deactivate")
         self.logout()
         response = self.client.post('/api/auth/login', json={
             'employee_id': ENGINEER['employee_id'], 'password': ENGINEER['password']})
+        self.assertEqual(response.status_code, 403)
+        self.assertIn('사용할 수 없는 계정', response.json()['detail'])
+        response = self.client.post('/api/auth/login', json={
+            'employee_id': ENGINEER['employee_id'], 'password': 'wrong-password-1'})
         self.assertEqual(response.status_code, 401)
 
     def test_me_requires_login(self):
@@ -212,7 +217,7 @@ class RoleEnforcementTests(ApiTestCase):
         self.logout()
         response = self.client.post('/api/auth/login', json={
             'employee_id': target, 'password': ENGINEER['password']})
-        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.status_code, 403)
 
         self.login(ADMIN)
         response = self.client.post(f'/api/users/{target}/activate')
@@ -232,6 +237,73 @@ class RoleEnforcementTests(ApiTestCase):
                                    json={'low_density': 0.9, 'high_density': 0.2,
                                          'confidence': 0.8})
         self.assertEqual(response.status_code, 422)
+
+
+
+class SignupTests(ApiTestCase):
+    """가입 신청 → 승인 대기 → 관리자 승인 → 로그인."""
+
+    NEW = {'employee_id': 'N0100', 'name': '신청자', 'email': 'n0100@example.com',
+           'department': '품질팀', 'password': 'applicant-pass-1'}
+
+    def test_signup_creates_pending_account_that_cannot_log_in(self):
+        response = self.client.post('/api/auth/register', json=self.NEW)
+        self.assertEqual(response.status_code, 201, response.text)
+        body = response.json()
+        self.assertFalse(body['is_active'])
+        self.assertTrue(body['is_pending'])
+        self.assertEqual(body['role'], 'engineer')
+        self.assertNotIn(self.NEW['password'], response.text)
+
+        response = self.client.post('/api/auth/login', json={
+            'employee_id': 'N0100', 'password': self.NEW['password']})
+        self.assertEqual(response.status_code, 403)
+        self.assertIn('승인 대기', response.json()['detail'])
+        # 비밀번호가 틀리면 승인 대기 여부도 알려주지 않는다
+        response = self.client.post('/api/auth/login', json={
+            'employee_id': 'N0100', 'password': 'wrong-password-1'})
+        self.assertEqual(response.status_code, 401)
+
+    def test_signup_cannot_choose_a_role(self):
+        response = self.client.post('/api/auth/register', json={**self.NEW, 'role': 'admin'})
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertEqual(response.json()['role'], 'engineer')
+
+    def test_admin_approval_enables_login(self):
+        self.client.post('/api/auth/register', json=self.NEW)
+        self.login(ADMIN)
+        pending = [u['employee_id'] for u in self.client.get('/api/users').json() if u['is_pending']]
+        self.assertEqual(pending, ['N0100'])
+        response = self.client.post('/api/users/N0100/activate')
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse(response.json()['is_pending'])
+        self.assertIsNotNone(response.json()['approved_at'])
+        self.logout()
+
+        self.login({'employee_id': 'N0100', 'password': self.NEW['password']})
+        self.assertEqual(self.client.get('/api/auth/me').json()['role'], 'engineer')
+
+    def test_deactivated_account_is_not_pending(self):
+        """관리자가 만든 뒤 비활성화한 계정은 승인 대기가 아니다. 승인 목록에 섞이면 안 된다."""
+        self.login(ADMIN)
+        self.client.post(f"/api/users/{ENGINEER['employee_id']}/deactivate")
+        users = {u['employee_id']: u for u in self.client.get('/api/users').json()}
+        self.assertFalse(users[ENGINEER['employee_id']]['is_pending'])
+        self.assertFalse(users[ENGINEER['employee_id']]['is_active'])
+
+    def test_duplicate_signup_rejected(self):
+        taken_id = {**self.NEW, 'employee_id': ENGINEER['employee_id']}
+        self.assertEqual(self.client.post('/api/auth/register', json=taken_id).status_code, 409)
+        taken_email = {**self.NEW, 'email': f"{ENGINEER['employee_id']}@example.com"}
+        self.assertEqual(self.client.post('/api/auth/register', json=taken_email).status_code, 409)
+
+
+class SignupDisabledTests(ApiTestCase):
+    settings_overrides = {'allow_signup': False}
+
+    def test_signup_refused_when_disabled(self):
+        response = self.client.post('/api/auth/register', json=SignupTests.NEW)
+        self.assertEqual(response.status_code, 403)
 
 
 if __name__ == '__main__':

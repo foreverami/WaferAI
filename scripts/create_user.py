@@ -18,7 +18,7 @@ from sqlalchemy.engine import make_url
 from waferai.auth import hash_password
 from waferai.config import settings
 from waferai.db import create_all, create_db_engine, create_session_factory
-from waferai.models import Role, User
+from waferai.models import Role, User, utcnow
 
 MIN_LENGTH = 8
 
@@ -61,7 +61,7 @@ def main() -> None:
         password = prompt_password()
         session.add(User(employee_id=args.employee_id, name=args.name, email=args.email,
                          department=args.department, role=args.role,
-                         password_hash=hash_password(password)))
+                         password_hash=hash_password(password), approved_at=utcnow()))
         session.commit()
 
     print(f'\n생성 완료: {args.employee_id} ({args.name}, {args.role})')
