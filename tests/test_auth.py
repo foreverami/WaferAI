@@ -301,6 +301,36 @@ class SignupTests(ApiTestCase):
         self.assertEqual(self.client.post('/api/auth/register', json=taken_email).status_code, 409)
 
 
+class ValidationMessageTests(ApiTestCase):
+    """입력 검증 실패는 어느 항목이 왜 틀렸는지 한국어 한 줄로 알려줘야 한다."""
+
+    def test_invalid_email_and_short_password_are_explained(self):
+        response = self.client.post('/api/auth/register', json={
+            **SignupTests.NEW, 'email': 'not-an-email', 'password': 'short'})
+        self.assertEqual(response.status_code, 422)
+        detail = response.json()['detail']
+        self.assertIsInstance(detail, str)
+        self.assertIn('이메일 형식', detail)
+        self.assertIn('비밀번호은(는) 8자 이상', detail)
+
+    def test_missing_field_is_named(self):
+        payload = {k: v for k, v in SignupTests.NEW.items() if k != 'name'}
+        response = self.client.post('/api/auth/register', json=payload)
+        self.assertEqual(response.status_code, 422)
+        self.assertIn('이름을(를) 입력하세요', response.json()['detail'])
+
+    def test_login_validation_uses_korean_too(self):
+        response = self.client.post('/api/auth/login', json={'employee_id': '', 'password': ''})
+        self.assertEqual(response.status_code, 422)
+        self.assertIn('사번', response.json()['detail'])
+
+    def test_reapplying_while_pending_says_so(self):
+        self.client.post('/api/auth/register', json=SignupTests.NEW)
+        response = self.client.post('/api/auth/register', json=SignupTests.NEW)
+        self.assertEqual(response.status_code, 409)
+        self.assertIn('승인을 기다리는 중', response.json()['detail'])
+
+
 class SignupDisabledTests(ApiTestCase):
     settings_overrides = {'allow_signup': False}
 

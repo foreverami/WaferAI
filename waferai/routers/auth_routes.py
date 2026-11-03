@@ -60,8 +60,10 @@ def register(body: SignupRequest, request: Request, session: Session = Depends(g
     """
     if not getattr(request.app.state, 'allow_signup', True):
         raise HTTPException(403, '가입 신청을 받지 않습니다. 관리자에게 계정을 요청하세요')
-    if session.get(User, body.employee_id):
-        raise HTTPException(409, '이미 존재하는 사번입니다')
+    existing = session.get(User, body.employee_id)
+    if existing is not None:
+        raise HTTPException(409, '이미 신청된 사번입니다. 관리자의 승인을 기다리는 중이니 다시 신청하지 않아도 됩니다'
+                                 if existing.is_pending else '이미 존재하는 사번입니다. 비밀번호를 잊었으면 관리자에게 문의하세요')
     if session.execute(select(User).where(User.email == body.email)).scalar_one_or_none():
         raise HTTPException(409, '이미 사용 중인 이메일입니다')
     try:

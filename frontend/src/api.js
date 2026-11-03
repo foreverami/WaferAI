@@ -9,7 +9,9 @@ export class ApiError extends Error {
   constructor(status, detail) {
     super(detail || `요청이 실패했습니다 (${status})`)
     this.status = status
-    this.detail = detail
+    // 서버가 이유를 주지 않은 응답(502, 네트워크 중간 장비의 HTML 오류 등)도 코드만은 보여 준다.
+    // 화면들은 caught.detail 을 그대로 띄우므로 여기서 채워 두면 "실패했습니다" 만 뜨는 일이 없다.
+    this.detail = detail || `서버가 이유 없이 거부했습니다 (응답 코드 ${status})`
   }
 }
 
