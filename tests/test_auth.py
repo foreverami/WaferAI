@@ -125,6 +125,9 @@ class LoginTests(ApiTestCase):
 
     def test_tampered_cookie_rejected(self):
         self.login(ENGINEER)
+        # 유효한 쿠키를 비우고 변조 쿠키만 보낸다. 같은 이름으로 set 만 하면 httpx 버전에 따라
+        # 두 쿠키가 함께 전송되어 서버가 유효한 쪽을 먼저 읽을 수 있다 (CI 에서만 실패했던 원인).
+        self.client.cookies.clear()
         self.client.cookies.set('waferai_session', 'forged.token.value')
         self.assertEqual(self.client.get('/api/auth/me').status_code, 401)
 
