@@ -139,13 +139,35 @@ HTTPS 를 켠 뒤로는 `docker compose` 명령마다 `-f compose.yaml -f compos
 메일 발송 없이 쓰는 방식이다(서버에 메일 설정이 없고, 클라우드 VM 은 메일 발송이 자주 막힌다).
 
 * **일반 사용자** — 관리자가 화면의 계정 탭에서 그 사람 행의 **비밀번호 초기화** 를 누른다. 임시
-  비밀번호가 한 번만 표시되므로 본인에게 전달하고, 본인은 로그인 뒤 계정 탭에서 바꾼다.
+  비밀번호가 한 번만 표시되므로 본인에게 전달한다. 본인은 임시 비밀번호로 로그인하면 계정 화면으로
+  보내지고, 비밀번호를 바꾸기 전에는 다른 화면을 쓸 수 없다. 초기화하면 그 사람의 기존 로그인은
+  모두 끊긴다.
+* **잠긴 계정** — 5회 연속 틀리면 60초부터 최대 15분까지 잠긴다. 기다리면 풀리고, 급하면 관리자가
+  계정 탭의 **잠금 해제** 를 누른다.
 * **관리자 본인** — 서버에서 직접 바꾼다. 새 비밀번호는 실행 중에 입력한다.
 
 ```sh
 docker compose -f compose.yaml -f compose.https.yaml exec api \
     python -m scripts.reset_password --employee-id 사번
 ```
+
+## 보안 감사 로그
+
+로그인 성공 · 실패 · 잠금, 로그아웃, 가입 신청 · 승인 · 비활성화, 임시 비밀번호 발급, 잠금 해제가
+api 컨테이너 로그에 `audit` 접두어로 남는다. 비밀번호와 토큰은 적지 않는다.
+
+```sh
+docker compose -f compose.yaml -f compose.https.yaml logs api | grep ' audit '
+```
+
+```
+2026-11-04 01:12:03,118 audit login.fail ip=203.0.113.7 employee_id=E0001
+2026-11-04 01:12:40,551 audit login.lock ip=203.0.113.7 employee_id=E0001 failures=5 seconds=60
+2026-11-04 01:15:02,004 audit password.reset ip=10.0.0.4 employee_id=E0001 by=A0001
+```
+
+IP 는 Nginx 가 넣는 `X-Real-IP` 다. 로그인 · 가입 신청 경로는 Nginx 가 IP 당 분당 30회로 제한하며,
+넘으면 Nginx 가 직접 JSON 429 를 돌려주고 access 로그에 `limiting requests` 가 찍힌다.
 
 ## 백업과 복원
 

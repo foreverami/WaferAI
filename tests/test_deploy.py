@@ -346,6 +346,25 @@ class NginxTests(unittest.TestCase):
                                  'x-frame-options'):
                     self.assertIn(required, headers, f'{name}: {required} 없음')
 
+    def test_login_is_rate_limited_with_json_429(self):
+        """로그인 · 가입 신청 경로는 IP 속도 제한이 있어야 하고, 429 본문은 화면이 읽는 JSON 이어야 한다."""
+        for name, payload in self.payloads.items():
+            for server in servers(payload):
+                if not find(server['block'], 'root'):
+                    continue
+                limited = [loc for loc in find(server['block'], 'location')
+                           if find(loc['block'], 'limit_req')]
+                self.assertEqual(len(limited), 1, f'{name}: 속도 제한 location 이 하나여야 합니다')
+                self.assertIn('login', ''.join(limited[0]['args']), name)
+                self.assertIn('register', ''.join(limited[0]['args']), name)
+                self.assertTrue(find(limited[0]['block'], 'proxy_pass'), name)
+                fallback = [loc for loc in find(server['block'], 'location')
+                            if loc['args'] == ['@too_many_requests']]
+                self.assertEqual(len(fallback), 1, name)
+                self.assertEqual(find(fallback[0]['block'], 'default_type')[0]['args'],
+                                 ['application/json'], name)
+                self.assertIn('detail', find(fallback[0]['block'], 'return')[0]['args'][1], name)
+
     def test_upload_limit_exceeds_the_application_limit(self):
         from waferai.routers.wafer_routes import MAX_UPLOAD_BYTES
 

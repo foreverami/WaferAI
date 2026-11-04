@@ -25,6 +25,11 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def aware(moment: datetime) -> datetime:
+    """SQLite 는 tz 를 버리고 naive 로 돌려준다. 비교하기 전에 UTC 로 못 박는다."""
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=timezone.utc)
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -61,8 +66,26 @@ class User(Base):
     # 기본값을 두지 않는다 — 가입 신청은 반드시 비어 있어야 하고, 관리자 생성은 명시적으로 채운다.
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # 토큰 세대. 비밀번호 변경·초기화·비활성화 때 1 올리면 그 전에 발급된 토큰은 전부 무효가 된다.
+    # 서버가 토큰을 저장하지 않고도 "다른 기기 세션" 을 끊는 방법이다.
+    token_version: Mapped[int] = mapped_column(Integer, default=0, server_default='0')
+    # 연속 로그인 실패 횟수와 잠금 해제 시각. 성공하면 0 으로 돌아간다.
+    failed_logins: Mapped[int] = mapped_column(Integer, default=0, server_default='0')
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    # 임시 비밀번호로 로그인한 상태. 비밀번호를 바꾸기 전에는 다른 API 를 쓸 수 없다.
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, server_default='0')
 
     reviews: Mapped[list['ReviewResult']] = relationship(back_populates='reviewer')
+
+    @property
+    def is_locked(self) -> bool:
+        return self.locked_until is not None and aware(self.locked_until) > utcnow()
+
+    @property
+    def lock_seconds_left(self) -> int:
+        if not self.is_locked:
+            return 0
+        return max(1, int((aware(self.locked_until) - utcnow()).total_seconds()))
 
     @property
     def role_enum(self) -> Role:
@@ -72,6 +95,19 @@ class User(Base):
     def is_pending(self) -> bool:
         """가입 신청 뒤 아직 승인되지 않음. 관리자가 비활성화한 계정과 구분된다."""
         return not self.is_active and self.approved_at is None
+
+
+class RevokedToken(Base):
+    """로그아웃한 토큰. JWT 는 스스로 무효가 되지 않으므로 만료 전까지 여기에 적어 둔다.
+
+    로그아웃은 그 기기의 토큰 하나만 끊어야 한다(다른 기기는 그대로). 비밀번호 변경처럼 전부
+    끊을 때는 users.token_version 을 쓴다. 만료가 지난 행은 로그아웃 때마다 함께 지운다.
+    """
+
+    __tablename__ = 'revoked_tokens'
+
+    jti: Mapped[str] = mapped_column(String(64), primary_key=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
 
 class AiModel(Base):

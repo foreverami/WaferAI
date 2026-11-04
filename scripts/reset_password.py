@@ -35,6 +35,10 @@ def main() -> None:
         print(f'{user.employee_id} ({user.name}, {user.role}) 의 새 비밀번호를 입력하세요.')
         user.password_hash = hash_password(prompt_password())
         user.password_changed_at = utcnow()
+        user.token_version = (user.token_version or 0) + 1     # 살아 있는 세션은 모두 끊는다
+        user.failed_logins = 0
+        user.locked_until = None
+        user.must_change_password = False                      # 본인이 직접 정한 비밀번호다
         session.add(user)
         session.commit()
 

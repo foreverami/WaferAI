@@ -31,6 +31,10 @@ function RequireAuth({ children, minRole }) {
   if (!user) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />
   }
+  // 임시 비밀번호로 들어온 사람은 비밀번호를 바꾸기 전까지 계정 화면만 쓴다. 서버도 다른 API 를 403 으로 막는다.
+  if (user.must_change_password && location.pathname !== '/account') {
+    return <Navigate to="/account" replace />
+  }
   if (minRole && !can(minRole)) {
     return <Navigate to="/" replace />
   }

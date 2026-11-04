@@ -21,7 +21,7 @@ from waferai.db import create_all, create_db_engine, create_session_factory
 from waferai.heatmap import HeatmapService
 from waferai.inference import Predictor
 from waferai.models import AiModel, User, utcnow
-from waferai import errors
+from waferai import audit, errors
 from waferai.routers import admin_routes, auth_routes, model_routes, wafer_routes
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -119,6 +119,7 @@ def create_app(config: Settings | None = None, *, database_url: str | None = Non
 
     app = FastAPI(title='WaferAI Vision API', lifespan=lifespan)
     errors.install(app)                     # 입력 검증 오류를 한국어 한 줄로
+    audit.install()                         # 로그인 · 잠금 · 발급 로그를 표준 출력으로
     app.include_router(auth_routes.router)
     app.include_router(wafer_routes.router)
     app.include_router(admin_routes.router)

@@ -29,6 +29,7 @@ const RANK = { engineer: 0, senior_engineer: 1, admin: 2 }
 // 이 날짜가 지나면 비밀번호 변경을 권한다 (UIUX 화면 8 "정기 변경 주기 유도")
 const PASSWORD_WARN_DAYS = 90
 const MIN_PASSWORD = 8
+const PASSWORD_RULE = '8자 이상. 12자 미만이면 영문 · 숫자 · 한글 · 특수문자 중 두 종류 이상을 섞으세요. 사번은 넣을 수 없습니다'
 
 const INPUT =
   'w-full rounded-lg border border-line bg-panel px-3 py-2.5 text-sm outline-none focus:border-brand disabled:cursor-not-allowed disabled:opacity-60'
@@ -70,6 +71,11 @@ function Profile({ user }) {
 
   return (
     <section className="space-y-5 rounded-xl border border-line bg-panel p-5">
+      {user.must_change_password && (
+        <div className="rounded-lg border border-warn/40 bg-warn/10 px-4 py-3 text-sm text-warn">
+          임시 비밀번호로 로그인했습니다. 오른쪽에서 비밀번호를 바꾸기 전에는 다른 화면을 쓸 수 없습니다.
+        </div>
+      )}
       <div className="flex items-start justify-between gap-4">
         <div>
           <h3 className="font-semibold">내 계정</h3>
@@ -156,9 +162,7 @@ function PasswordForm({ onChanged }) {
   return (
     <section className="rounded-xl border border-line bg-panel p-5">
       <h3 className="font-semibold">비밀번호 변경</h3>
-      <p className="mt-0.5 text-xs text-muted">
-        {MIN_PASSWORD}자 이상. 한글을 포함해 어떤 문자든 쓸 수 있습니다.
-      </p>
+      <p className="mt-0.5 text-xs text-muted">{PASSWORD_RULE}.</p>
 
       <form onSubmit={handleSubmit} className="mt-5 space-y-4">
         <Field label="현재 비밀번호">
@@ -199,7 +203,7 @@ function PasswordForm({ onChanged }) {
           <button type="submit" disabled={!ready} className={BUTTON}>
             {busy ? '바꾸는 중…' : '비밀번호 바꾸기'}
           </button>
-          {done && <span className="text-sm text-pass">바꿨습니다. 새 세션으로 이어집니다.</span>}
+          {done && <span className="text-sm text-pass">바꿨습니다. 다른 기기의 로그인은 모두 풀렸습니다.</span>}
         </div>
       </form>
     </section>
@@ -255,9 +259,22 @@ function UserAdmin({ me }) {
       const result = await api.resetPassword(target.employee_id)
       setIssued(result)
       setConfirmReset(null)
-      replace({ ...target, password_changed_at: new Date().toISOString() })
+      replace({ ...target, password_changed_at: new Date().toISOString(), must_change_password: true,
+                is_locked: false, failed_logins: 0 })
     } catch (caught) {
       setError(caught.detail || '비밀번호를 초기화하지 못했습니다')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const unlock = async (target) => {
+    setBusy(target.employee_id)
+    setError(null)
+    try {
+      replace(await api.unlockUser(target.employee_id))
+    } catch (caught) {
+      setError(caught.detail || '잠금을 풀지 못했습니다')
     } finally {
       setBusy(null)
     }
@@ -374,9 +391,26 @@ function UserAdmin({ me }) {
                       ) : (
                         <span className="text-danger">비활성</span>
                       )}
+                      {item.is_locked && (
+                        <span className="ml-1.5 font-medium text-danger" title={`연속 ${item.failed_logins}회 실패`}>
+                          · 잠김
+                        </span>
+                      )}
+                      {item.must_change_password && (
+                        <span className="ml-1.5 text-muted" title="임시 비밀번호로 로그인한 뒤 바꾸지 않았습니다">
+                          · 임시 비밀번호
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-xs tabular-nums">{formatTime(item.password_changed_at)}</td>
                     <td className="px-4 py-3 text-right whitespace-nowrap">
+                      {item.is_locked && (
+                        <button onClick={() => unlock(item)} disabled={busy === item.employee_id}
+                                title="연속 실패 잠금을 바로 풉니다 (기다리면 최대 15분 뒤 저절로 풀립니다)"
+                                className="mr-2 rounded-lg border border-danger/40 px-3 py-1.5 text-xs text-danger hover:bg-danger/10 disabled:opacity-40">
+                          잠금 해제
+                        </button>
+                      )}
                       {!self && !item.is_pending && (
                         confirmReset === item.employee_id ? (
                           <span className="mr-2 inline-flex items-center gap-1 text-xs">
@@ -455,7 +489,7 @@ function UserAdmin({ me }) {
               ))}
             </select>
           </Field>
-          <Field label="초기 비밀번호" hint={`${MIN_PASSWORD}자 이상`}>
+          <Field label="초기 비밀번호" hint={PASSWORD_RULE}>
             <input type="password" value={form.password} onChange={(e) => update({ password: e.target.value })}
                    autoComplete="new-password" minLength={MIN_PASSWORD} required className={INPUT} />
           </Field>

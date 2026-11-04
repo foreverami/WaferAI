@@ -18,9 +18,9 @@ export default function Login() {
     setBusy(true)
     setError(null)
     try {
-      await login(employeeId.trim(), password)
-      // 로그인 전에 가려던 곳이 있으면 그리로, 없으면 메인으로.
-      navigate(location.state?.from || '/', { replace: true })
+      const me = await login(employeeId.trim(), password)
+      // 임시 비밀번호면 먼저 바꾸게 한다. 아니면 로그인 전에 가려던 곳으로, 없으면 메인으로.
+      navigate(me.must_change_password ? '/account' : location.state?.from || '/', { replace: true })
     } catch (caught) {
       setError(caught.detail || '로그인에 실패했습니다')
       setPassword('')
@@ -87,8 +87,8 @@ export default function Login() {
           </Link>
         </p>
         <p className="mt-2 text-center text-xs text-muted">
-          비밀번호를 잊으셨나요? 관리자에게 초기화를 요청하세요. 임시 비밀번호를 받은 뒤 계정
-          탭에서 바꾸면 됩니다.
+          비밀번호를 잊으셨나요? 관리자에게 초기화를 요청하세요. 임시 비밀번호로 로그인하면 바로
+          바꾸게 됩니다. 5회 연속 틀리면 잠시 잠깁니다.
         </p>
       </div>
     </div>

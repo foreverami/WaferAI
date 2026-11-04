@@ -1,9 +1,10 @@
 import unittest
 
 from tests.conftest import ADMIN, ENGINEER, SENIOR, ApiTestCase
-from waferai.auth import (create_access_token, decode_access_token, hash_password,
-                          verify_password)
+from waferai.auth import (check_password_policy, create_access_token, decode_access_token,
+                          hash_password, verify_password)
 from waferai.models import Role
+from waferai.routers.auth_routes import lock_seconds
 
 
 class PasswordHashingTests(unittest.TestCase):
@@ -380,3 +381,186 @@ class SignupDisabledTests(ApiTestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class PasswordPolicyTests(unittest.TestCase):
+    """길이 우선. 짧으면 섞임을 요구하고, 사번 · 흔한 값 · 한 글자 반복은 거부한다."""
+
+    def test_long_passphrase_needs_no_mixing(self):
+        check_password_policy('비밀번호를아주길게설정하는경우')          # 한글만 15자
+        check_password_policy('correct horse battery')
+
+    def test_short_single_kind_rejected(self):
+        with self.assertRaises(ValueError):
+            check_password_policy('abcdefgh')                      # 영문만 8자
+        with self.assertRaises(ValueError):
+            check_password_policy('13572468')                      # 숫자만 8자
+
+    def test_short_mixed_accepted(self):
+        check_password_policy('abcd-1234')
+        check_password_policy('wafer2026')
+
+    def test_employee_id_inside_password_rejected(self):
+        with self.assertRaises(ValueError):
+            check_password_policy('E0001-pass-1', employee_id='E0001')
+
+    def test_common_and_repeated_rejected(self):
+        with self.assertRaises(ValueError):
+            check_password_policy('12345678')
+        with self.assertRaises(ValueError):
+            check_password_policy('aaaaaaaaaaaa')
+
+
+class PasswordPolicyApiTests(ApiTestCase):
+    def test_signup_with_weak_password_tells_why(self):
+        response = self.client.post('/api/auth/register', json={
+            'employee_id': 'N0200', 'name': '신청', 'email': 'n0200@example.com', 'password': 'abcdefgh'})
+        self.assertEqual(response.status_code, 422)
+        self.assertIn('두 종류', response.json()['detail'])
+
+    def test_change_to_password_containing_employee_id_rejected(self):
+        self.login(ENGINEER)
+        response = self.client.post('/api/auth/password', json={
+            'current_password': ENGINEER['password'], 'new_password': f"{ENGINEER['employee_id']}-secret"})
+        self.assertEqual(response.status_code, 422)
+        self.assertIn('사번', response.json()['detail'])
+
+
+class LockoutTests(ApiTestCase):
+    """연속 5회 실패하면 60초 잠긴다. 잠긴 동안은 맞는 비밀번호도 429, 성공하면 횟수가 0 으로 돌아간다."""
+
+    def fail(self, times: int) -> list[int]:
+        return [self.client.post('/api/auth/login', json={
+            'employee_id': ENGINEER['employee_id'], 'password': f'wrong-{i}-pass'}).status_code
+            for i in range(times)]
+
+    def test_fifth_failure_locks_even_the_right_password(self):
+        self.assertEqual(self.fail(5), [401] * 5)
+        response = self.client.post('/api/auth/login', json={
+            'employee_id': ENGINEER['employee_id'], 'password': ENGINEER['password']})
+        self.assertEqual(response.status_code, 429)
+        self.assertIn('초 뒤에', response.json()['detail'])
+
+    def test_four_failures_then_success_resets_counter(self):
+        self.fail(4)
+        self.login(ENGINEER)
+        self.logout()
+        self.assertEqual(self.fail(4), [401] * 4)          # 다시 4번까지는 잠기지 않는다
+        self.login(ENGINEER)
+
+    def test_lock_grows_then_caps(self):
+        self.assertEqual([lock_seconds(n) for n in (4, 5, 6, 7, 8, 9, 20)],
+                         [0, 60, 120, 240, 480, 900, 900])
+
+    def test_admin_can_unlock(self):
+        self.fail(5)
+        self.login(ADMIN)
+        response = self.client.post(f"/api/users/{ENGINEER['employee_id']}/unlock")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse(response.json()['is_locked'])
+        self.logout()
+        self.login(ENGINEER)
+
+    def test_lock_state_visible_to_admin(self):
+        self.fail(5)
+        self.login(ADMIN)
+        listed = {u['employee_id']: u for u in self.client.get('/api/users').json()}
+        self.assertTrue(listed[ENGINEER['employee_id']]['is_locked'])
+        self.assertEqual(listed[ENGINEER['employee_id']]['failed_logins'], 5)
+
+    def test_unknown_id_never_locks_and_stays_indistinguishable(self):
+        for _ in range(6):
+            response = self.client.post('/api/auth/login', json={
+                'employee_id': 'NOBODY', 'password': 'wrong-pass-1'})
+            self.assertEqual(response.status_code, 401)
+
+
+class SessionRevocationTests(ApiTestCase):
+    """JWT 는 스스로 무효가 되지 않는다. 로그아웃한 토큰과 비밀번호 변경 전 토큰은 서버가 거부해야 한다."""
+
+    def cookie(self) -> str:
+        return self.client.cookies.get('waferai_session')
+
+    def use(self, token: str) -> None:
+        self.client.cookies.clear()
+        self.client.cookies.set('waferai_session', token)
+
+    def test_logged_out_token_is_rejected_even_if_replayed(self):
+        self.login(ENGINEER)
+        stolen = self.cookie()
+        self.client.post('/api/auth/logout')
+        self.use(stolen)                                   # 복사해 둔 쿠키를 다시 보낸다
+        self.assertEqual(self.client.get('/api/auth/me').status_code, 401)
+
+    def test_logout_affects_only_that_device(self):
+        self.login(ENGINEER)
+        phone = self.cookie()
+        self.client.cookies.clear()
+        self.login(ENGINEER)
+        pc = self.cookie()
+        self.assertNotEqual(phone, pc)
+        self.client.post('/api/auth/logout')               # PC 에서 로그아웃
+        self.use(phone)
+        self.assertEqual(self.client.get('/api/auth/me').status_code, 200)
+
+    def test_password_change_kicks_other_devices(self):
+        self.login(ENGINEER)
+        other = self.cookie()
+        self.client.cookies.clear()
+        self.login(ENGINEER)
+        response = self.client.post('/api/auth/password', json={
+            'current_password': ENGINEER['password'], 'new_password': 'brand-new-pass-99'})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.client.get('/api/auth/me').status_code, 200)   # 이 기기는 새 토큰
+        self.use(other)
+        self.assertEqual(self.client.get('/api/auth/me').status_code, 401)   # 다른 기기는 끊김
+
+    def test_admin_reset_kicks_existing_sessions(self):
+        self.login(ENGINEER)
+        victim = self.cookie()
+        self.client.cookies.clear()
+        self.login(ADMIN)
+        self.client.post(f"/api/users/{ENGINEER['employee_id']}/reset-password")
+        self.use(victim)
+        self.assertEqual(self.client.get('/api/auth/me').status_code, 401)
+
+    def test_deactivation_kicks_existing_sessions(self):
+        self.login(ENGINEER)
+        victim = self.cookie()
+        self.client.cookies.clear()
+        self.login(ADMIN)
+        self.client.post(f"/api/users/{ENGINEER['employee_id']}/deactivate")
+        self.use(victim)
+        self.assertEqual(self.client.get('/api/auth/me').status_code, 401)
+
+
+class MustChangePasswordTests(ApiTestCase):
+    """임시 비밀번호로 들어오면 비밀번호를 바꾸기 전에는 내 정보 · 비밀번호 변경 · 로그아웃만 된다."""
+
+    def issue_temporary(self) -> str:
+        self.login(ADMIN)
+        temporary = self.client.post(f"/api/users/{ENGINEER['employee_id']}/reset-password").json()['temporary_password']
+        self.logout()
+        return temporary
+
+    def test_other_apis_blocked_until_changed(self):
+        temporary = self.issue_temporary()
+        login = self.client.post('/api/auth/login', json={
+            'employee_id': ENGINEER['employee_id'], 'password': temporary})
+        self.assertEqual(login.status_code, 200, login.text)
+        self.assertTrue(login.json()['must_change_password'])
+        self.assertEqual(self.client.get('/api/auth/me').status_code, 200)
+        blocked = self.client.get('/api/records')
+        self.assertEqual(blocked.status_code, 403)
+        self.assertIn('비밀번호를 먼저', blocked.json()['detail'])
+
+        changed = self.client.post('/api/auth/password', json={
+            'current_password': temporary, 'new_password': 'my-own-pass-2026'})
+        self.assertEqual(changed.status_code, 200, changed.text)
+        self.assertFalse(changed.json()['must_change_password'])
+        self.assertEqual(self.client.get('/api/records').status_code, 200)
+
+    def test_temporary_password_satisfies_policy(self):
+        """발급된 임시 비밀번호 자체가 정책을 통과해야 한다 — 통과 못 하면 발급이 500 으로 터진다."""
+        for _ in range(5):
+            check_password_policy(self.issue_temporary(), ENGINEER['employee_id'])

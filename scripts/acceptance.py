@@ -247,6 +247,35 @@ def main() -> None:
             old = t.post('/api/auth/login', json={'employee_id': tmp_id, 'password': 'tmp-pass-12345'}).status_code
             new = t.post('/api/auth/login', json={'employee_id': tmp_id, 'password': temp}).status_code
         check('비밀번호 초기화 → 옛 비밀번호 거부 · 임시 비밀번호 로그인', r.status_code == 200 and old == 401 and new == 200)
+        # 임시 비밀번호 상태: 바꾸기 전엔 다른 API 가 403, 바꾸면 풀린다
+        with client(base) as t:
+            me = t.post('/api/auth/login', json={'employee_id': tmp_id, 'password': temp}).json()
+            blocked = t.get('/api/records').status_code
+            changed = t.post('/api/auth/password', json={'current_password': temp, 'new_password': 'tmp-pass-67890'})
+            freed = t.get('/api/records').status_code
+        check('임시 비밀번호 → 변경 전 403 · 변경 후 통과', me.get('must_change_password') is True and blocked == 403 and changed.status_code == 200 and freed == 200, f'{blocked}/{changed.status_code}/{freed}')
+        # 약한 비밀번호는 이유와 함께 거부
+        with client(base) as t:
+            t.post('/api/auth/login', json={'employee_id': tmp_id, 'password': 'tmp-pass-67890'})
+            weak = t.post('/api/auth/password', json={'current_password': 'tmp-pass-67890', 'new_password': 'abcdefgh'})
+        check('약한 비밀번호 → 422 한국어 이유', weak.status_code == 422 and '두 종류' in weak.json().get('detail', ''), weak.json().get('detail', '')[:50])
+        # 로그아웃한 쿠키를 다시 보내면 거부
+        with client(base) as t:
+            t.post('/api/auth/login', json={'employee_id': tmp_id, 'password': 'tmp-pass-67890'})
+            stolen = t.cookies.get('waferai_session')
+            t.post('/api/auth/logout')
+            t.cookies.clear()
+            t.cookies.set('waferai_session', stolen)
+            replay = t.get('/api/auth/me').status_code
+        check('로그아웃한 세션 재사용 → 401', replay == 401, str(replay))
+        # 연속 5회 실패 → 잠김(맞는 비밀번호도 429) → 관리자 잠금 해제 → 로그인
+        with client(base) as t:
+            codes = [t.post('/api/auth/login', json={'employee_id': tmp_id, 'password': f'wrong-{i}-xx'}).status_code for i in range(5)]
+            locked = t.post('/api/auth/login', json={'employee_id': tmp_id, 'password': 'tmp-pass-67890'})
+        unlocked = c.post(f'/api/users/{tmp_id}/unlock')
+        with client(base) as t:
+            after = t.post('/api/auth/login', json={'employee_id': tmp_id, 'password': 'tmp-pass-67890'}).status_code
+        check('5회 실패 → 429 잠김 → 관리자 해제 → 로그인', codes == [401] * 5 and locked.status_code == 429 and unlocked.status_code == 200 and after == 200, f'{codes}/{locked.status_code}/{after}')
         check('자기 비밀번호 초기화 거부 → 422', c.post(f'/api/users/{adm[0]}/reset-password').status_code == 422)
         check('자기 계정 비활성화 거부 → 422', c.post(f'/api/users/{adm[0]}/deactivate').status_code == 422)
 

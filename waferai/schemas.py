@@ -58,6 +58,10 @@ class UserOut(BaseModel):
     is_pending: bool = False          # 가입 신청 뒤 승인 대기
     approved_at: datetime | None = None
     password_changed_at: datetime
+    must_change_password: bool = False    # 임시 비밀번호 상태 — 바꾸기 전엔 다른 기능을 못 쓴다
+    is_locked: bool = False               # 로그인 연속 실패로 잠김
+    locked_until: datetime | None = None
+    failed_logins: int = 0
 
 
 class ReviewRequest(BaseModel):

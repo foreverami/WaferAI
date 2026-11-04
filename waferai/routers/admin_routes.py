@@ -8,7 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from waferai.auth import get_session, hash_password, require_admin, require_senior
+from waferai import audit
+from waferai.auth import (check_password_policy, get_session, hash_password, require_admin,
+                          require_senior)
 from waferai.decision import Thresholds
 from waferai.models import Setting, THRESHOLDS_KEY, User, utcnow
 from waferai.routers.wafer_routes import load_thresholds
@@ -23,11 +25,12 @@ def list_users(session: Session = Depends(get_session), _: User = Depends(requir
 
 
 @router.post('/users', response_model=UserOut, status_code=201)
-def create_user(body: UserCreate, session: Session = Depends(get_session),
-                _: User = Depends(require_admin)):
+def create_user(body: UserCreate, request: Request, session: Session = Depends(get_session),
+                admin: User = Depends(require_admin)):
     if session.get(User, body.employee_id):
         raise HTTPException(409, '이미 존재하는 사번입니다')
     try:
+        check_password_policy(body.password, body.employee_id)
         user = User(employee_id=body.employee_id, name=body.name, email=body.email,
                     department=body.department, role=body.role,
                     password_hash=hash_password(body.password), approved_at=utcnow())
@@ -40,11 +43,12 @@ def create_user(body: UserCreate, session: Session = Depends(get_session),
     except IntegrityError as error:
         session.rollback()
         raise HTTPException(409, '이미 사용 중인 이메일입니다') from error
+    audit.log('user.create', request, employee_id=user.employee_id, role=user.role, by=admin.employee_id)
     return user
 
 
 @router.post('/users/{employee_id}/deactivate', response_model=UserOut)
-def deactivate_user(employee_id: str, session: Session = Depends(get_session),
+def deactivate_user(employee_id: str, request: Request, session: Session = Depends(get_session),
                     admin: User = Depends(require_admin)):
     if employee_id == admin.employee_id:
         # 마지막 관리자가 자기 계정을 잠그면 아무도 복구할 수 없다.
@@ -53,13 +57,15 @@ def deactivate_user(employee_id: str, session: Session = Depends(get_session),
     if user is None:
         raise HTTPException(404, '계정이 없습니다')
     user.is_active = False
+    user.token_version = (user.token_version or 0) + 1      # 살아 있는 세션도 즉시 끊는다
     session.add(user)
     session.flush()
+    audit.log('user.deactivate', request, employee_id=employee_id, by=admin.employee_id)
     return user
 
 
 @router.post('/users/{employee_id}/reset-password', response_model=TemporaryPassword)
-def reset_password(employee_id: str, session: Session = Depends(get_session),
+def reset_password(employee_id: str, request: Request, session: Session = Depends(get_session),
                    admin: User = Depends(require_admin)):
     """비밀번호를 잊은 사용자에게 임시 비밀번호를 만들어 준다.
 
@@ -72,26 +78,49 @@ def reset_password(employee_id: str, session: Session = Depends(get_session),
     user = session.get(User, employee_id)
     if user is None:
         raise HTTPException(404, '계정이 없습니다')
-    temporary = 'Wafer-' + secrets.token_urlsafe(9)            # 약 12자, 영문 · 숫자 · - _
+    temporary = 'Wafer-' + secrets.token_urlsafe(9)            # 약 18자, 영문 · 숫자 · - _
     user.password_hash = hash_password(temporary)
     user.password_changed_at = utcnow()
+    user.must_change_password = True                           # 첫 로그인 뒤 바꾸기 전엔 다른 기능 못 씀
+    user.token_version = (user.token_version or 0) + 1         # 옛 세션은 전부 끊는다
+    user.failed_logins = 0
+    user.locked_until = None
     session.add(user)
     session.flush()
+    audit.log('password.reset', request, employee_id=employee_id, by=admin.employee_id)
     return TemporaryPassword(employee_id=employee_id, temporary_password=temporary)
 
 
+@router.post('/users/{employee_id}/unlock', response_model=UserOut)
+def unlock_user(employee_id: str, request: Request, session: Session = Depends(get_session),
+                admin: User = Depends(require_admin)):
+    """연속 실패 잠금을 푼다. 잠금은 최대 15분이라 기다려도 되지만, 교대 중엔 그 시간이 아깝다."""
+    user = session.get(User, employee_id)
+    if user is None:
+        raise HTTPException(404, '계정이 없습니다')
+    user.failed_logins = 0
+    user.locked_until = None
+    session.add(user)
+    session.flush()
+    audit.log('user.unlock', request, employee_id=employee_id, by=admin.employee_id)
+    return user
+
+
 @router.post('/users/{employee_id}/activate', response_model=UserOut)
-def activate_user(employee_id: str, session: Session = Depends(get_session),
-                  _: User = Depends(require_admin)):
+def activate_user(employee_id: str, request: Request, session: Session = Depends(get_session),
+                  admin: User = Depends(require_admin)):
     """비활성화를 되돌린다. 가입 신청 계정에는 이것이 곧 승인이다."""
     user = session.get(User, employee_id)
     if user is None:
         raise HTTPException(404, '계정이 없습니다')
     user.is_active = True
-    if user.approved_at is None:
+    approving = user.approved_at is None
+    if approving:
         user.approved_at = utcnow()
     session.add(user)
     session.flush()
+    audit.log('user.approve' if approving else 'user.activate', request,
+              employee_id=employee_id, by=admin.employee_id)
     return user
 
 

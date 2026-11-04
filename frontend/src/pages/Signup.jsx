@@ -12,6 +12,7 @@ import { api } from '../api'
 import { ErrorNote } from '../components/ui'
 
 const MIN_PASSWORD = 8
+const PASSWORD_RULE = '8자 이상. 12자 미만이면 영문 · 숫자 · 한글 · 특수문자 중 두 종류 이상을 섞으세요. 사번은 넣을 수 없습니다'
 const INPUT =
   'w-full rounded-lg border border-line bg-panel px-3 py-2.5 text-sm outline-none focus:border-brand'
 
@@ -118,7 +119,7 @@ export default function Signup() {
                    onChange={(e) => update({ department: e.target.value })} />
           </Field>
           <Field id="password" label="비밀번호"
-                 hint={tooShort ? `${MIN_PASSWORD}자 이상이어야 합니다` : `${MIN_PASSWORD}자 이상. 한글을 포함해 어떤 문자든 쓸 수 있습니다`}>
+                 hint={tooShort ? `${MIN_PASSWORD}자 이상이어야 합니다` : PASSWORD_RULE}>
             <input id="password" type="password" value={form.password} minLength={MIN_PASSWORD}
                    required autoComplete="new-password" className={INPUT}
                    onChange={(e) => update({ password: e.target.value })} />
