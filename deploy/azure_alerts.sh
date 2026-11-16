@@ -31,4 +31,4 @@ az monitor metrics alert create -g "$RG" -n waferai-memory-low --scopes "$vm_id"
     --severity 3 --action "$group_id" --description "WaferAI 서버의 사용 가능 메모리가 300MB 아래입니다" -o none
 
 echo "경고 규칙 3개를 만들었습니다. 확인 메일이 오면 구독을 확인하세요."
-az monitor metrics alert list -g "$RG" --query "[].{이름:name, 켜짐:enabled}" -o table
+az monitor metrics alert list -g "$RG" --query "[].{name:name, enabled:enabled, severity:severity}" -o table
