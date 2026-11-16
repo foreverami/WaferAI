@@ -120,6 +120,11 @@ docker compose -f compose.yaml -f compose.https.yaml up -d
 
 HTTPS 를 켠 뒤로는 `docker compose` 명령마다 `-f compose.yaml -f compose.https.yaml` 를 붙인다.
 
+> **`nginx/https.conf` 는 git 에 없다** (도메인이 들어간 서버 전용 파일). `https.conf.example` 을 고쳐도
+> 서버의 `https.conf` 는 저절로 바뀌지 않는다. 11/17 운영 점검에서 로그인 속도 제한이 이 때문에 빠져
+> 있었다. `deploy_update.sh` 가 배포 때마다 예시에서 다시 만들고 `nginx -t` 로 검사한 뒤 반영한다.
+> 서버에서 직접 할 때는 위 2번의 `sed` 를 다시 실행하고 `docker compose exec web nginx -s reload`.
+
 ## 현재 배포 (2026-11-03)
 
 | 항목 | 값 |
