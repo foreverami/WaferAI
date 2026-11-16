@@ -36,6 +36,12 @@ class DecisionTests(unittest.TestCase):
         self.assertTrue(result['requires_human_review'])
         self.assertEqual(result['review_reasons'], ['원형이 아닙니다'])
 
+    def test_force_review_reason_kept_when_already_in_review(self):
+        low = {'none': 0.40, 'Loc': 0.35, 'Center': 0.25}
+        result = decide(low, 0.01, Thresholds(), force_review='색을 추정했습니다')
+        self.assertEqual(result['decision_path'], 'REVIEW_NEEDED')
+        self.assertEqual(result['review_reasons'], ['색을 추정했습니다'])
+
     def test_force_review_blocks_every_unattended_path(self):
         for ratio in (0.01, 0.95):                  # 자동 통과, 고밀도 규칙
             result = decide(self.PROBS, ratio, Thresholds(), force_review='색을 추정했습니다')

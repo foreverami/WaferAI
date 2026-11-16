@@ -135,6 +135,8 @@ def decide(probabilities: dict[str, float], defect_ratio: float,
     if force_review and path in (DecisionPath.AUTO_PASS, DecisionPath.RULE_BASE_NONE,
                                  DecisionPath.RULE_BASE_NEAR_FULL):
         final_class, path = top1['class'], DecisionPath.REVIEW_NEEDED
+    if force_review and path is DecisionPath.REVIEW_NEEDED:
+        # 확신도가 낮아 원래도 검토로 가는 경우에도 이유는 남긴다 — 검토자가 입력 해석부터 의심해야 한다
         reasons = [force_review]
 
     return {
