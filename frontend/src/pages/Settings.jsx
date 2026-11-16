@@ -32,6 +32,7 @@ export default function Settings() {
   const [values, setValues] = useState(null)
   const [meta, setMeta] = useState(null)
   const [profile, setProfile] = useState(null)
+  const [model, setModel] = useState(null) // { recommended, temperature, active }
   const [error, setError] = useState(null)
   const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -39,10 +40,12 @@ export default function Settings() {
   useEffect(() => {
     api
       .thresholds()
-      .then(({ updated_at, updated_by, confidence_profile, ...rest }) => {
+      .then(({ updated_at, updated_by, confidence_profile, recommended_class_thresholds,
+               temperature, class_confidence, ...rest }) => {
         setValues(rest)
         setMeta({ updated_at, updated_by })
         setProfile(confidence_profile)
+        setModel({ recommended: recommended_class_thresholds, temperature, active: class_confidence })
       })
       .catch((caught) => setError(caught.detail || '설정을 불러오지 못했습니다'))
   }, [])
@@ -56,10 +59,12 @@ export default function Settings() {
     setBusy(true)
     setError(null)
     try {
-      const { updated_at, updated_by, confidence_profile, ...rest } = await api.saveThresholds(values)
+      const { updated_at, updated_by, confidence_profile, recommended_class_thresholds,
+              temperature, class_confidence, ...rest } = await api.saveThresholds(values)
       setValues(rest)
       setMeta({ updated_at, updated_by })
       setProfile(confidence_profile)
+      setModel({ recommended: recommended_class_thresholds, temperature, active: class_confidence })
       setSaved(true)
     } catch (caught) {
       setError(caught.detail || '저장에 실패했습니다')
@@ -82,6 +87,8 @@ export default function Settings() {
     ? Math.floor(profile.confidence_max * 100) / 100
     : CONFIDENCE_CEILING
   const reviewRate = reviewRateAt(profile, values.confidence)
+  const recommended = model?.recommended
+  const classMode = Boolean(recommended) && values.use_class_thresholds
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -94,11 +101,40 @@ export default function Settings() {
 
       <ErrorNote>{error}</ErrorNote>
 
+      {recommended && (
+        <div className="space-y-3 rounded-xl border border-line bg-panel p-5">
+          <label className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              checked={values.use_class_thresholds}
+              onChange={(event) => update({ use_class_thresholds: event.target.checked })}
+              className="mt-1"
+            />
+            <span>
+              <span className="text-sm font-medium">모델 권장 클래스별 기준 사용</span>
+              <span className="mt-0.5 block text-xs text-muted">
+                이 모델은 확률을 보정(온도 T = {model.temperature})해서 확신도가 실제 정답률과 맞습니다.
+                검증 분할에서 맞춘 클래스별 기준을 함께 싣고 왔습니다. 켜 두면 아래 단일 임계값 대신 이
+                기준으로 판정합니다.
+              </span>
+            </span>
+          </label>
+          <div className="grid grid-cols-3 gap-2 text-xs sm:grid-cols-5">
+            {Object.entries(recommended).map(([name, value]) => (
+              <div key={name} className={`rounded-lg border px-2.5 py-1.5 ${classMode ? 'border-brand/40' : 'border-line opacity-60'}`}>
+                <p className="text-muted">{name}</p>
+                <p className="font-semibold tabular-nums">{formatPercent(value, 1)}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="space-y-6 rounded-xl border border-line bg-panel p-5">
-        <div>
+        <div className={classMode ? 'opacity-50' : ''}>
           <div className="mb-2 flex items-baseline justify-between">
             <label htmlFor="confidence" className="text-sm font-medium">
-              AI 확신도 임계값
+              AI 확신도 임계값{classMode ? ' (클래스별 기준을 쓰는 동안 쓰이지 않음)' : ''}
             </label>
             <span className="tabular-nums text-sm text-brand">
               {formatPercent(values.confidence, 0)}
@@ -112,11 +148,12 @@ export default function Settings() {
             step="0.01"
             value={values.confidence}
             onChange={(event) => update({ confidence: Number(event.target.value) })}
-            className="w-full accent-[var(--color-brand)]"
+            disabled={classMode}
+            className="w-full accent-[var(--color-brand)] disabled:cursor-not-allowed"
           />
           <p className="mt-1.5 text-xs text-muted">
-            이 값 미만이면 엔지니어 검토로 넘깁니다. 권장 75~85%. 높일수록 품질은
-            올라가지만 검토 부담이 늘어납니다.
+            이 값 미만이면 엔지니어 검토로 넘깁니다. 높일수록 품질은 올라가지만 검토 부담이 늘어납니다.
+            {model?.temperature ? ' 보정된 확신도라 값이 실제 정답률에 가깝습니다.' : ''}
           </p>
           {profile && (
             <p className="mt-1.5 text-xs text-muted tabular-nums">
@@ -137,9 +174,8 @@ export default function Settings() {
               }`}
             >
               이 값이면 웨이퍼의 {formatPercent(reviewRate, 0)}가 검토 대기로 갑니다
-              {reviewRate >= REVIEW_DANGER ? ' — 대기열이 감당할 수 없습니다.' : '.'} 이 모델의
-              확신도는 대부분 90~92% 사이에 몰려 있어, 그 구간에서는 1%p 차이로 검토량이 몇 배씩
-              달라집니다.
+              {reviewRate >= REVIEW_DANGER ? ' — 대기열이 감당할 수 없습니다.' : '.'} 확신도가 높은
+              구간에 몰려 있는 모델은 그 근처에서 1%p 차이로 검토량이 몇 배씩 달라집니다.
             </div>
           )}
         </div>

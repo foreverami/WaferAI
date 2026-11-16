@@ -5,20 +5,11 @@
  * 기억한다. 새로고침하면 `/api/auth/me` 로 다시 확인한다 — 쿠키를 읽을 수
  * 없으니 서버에 물어보는 것이 유일한 방법이고, 그래야 만료된 세션도 걸러진다.
  */
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { api } from './api'
-
-const AuthContext = createContext(null)
-
-/** 등급 순서. 상위는 하위 기능을 모두 쓸 수 있다. */
-const RANK = { engineer: 0, senior_engineer: 1, admin: 2 }
-
-export const ROLE_LABEL = {
-  engineer: '엔지니어',
-  senior_engineer: '수석 엔지니어',
-  admin: '관리자',
-}
+import { AuthContext } from './authContext'
+import { RANK } from './roles'
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
@@ -63,10 +54,4 @@ export function AuthProvider({ children }) {
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
-}
-
-export function useAuth() {
-  const context = useContext(AuthContext)
-  if (!context) throw new Error('useAuth 는 AuthProvider 안에서만 쓸 수 있습니다')
-  return context
 }

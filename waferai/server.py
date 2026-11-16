@@ -22,7 +22,8 @@ from waferai.heatmap import HeatmapService
 from waferai.inference import Predictor
 from waferai.models import AiModel, User, utcnow
 from waferai import audit, errors
-from waferai.routers import admin_routes, auth_routes, model_routes, wafer_routes
+from waferai.routers import (admin_routes, auth_routes, model_routes, system_routes,
+                             wafer_routes)
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -95,6 +96,7 @@ def create_app(config: Settings | None = None, *, database_url: str | None = Non
         app.state.predict_lock = Lock()
         app.state.retrain_threshold = config.retrain_threshold
         app.state.allow_signup = config.allow_signup
+        app.state.backup_dir = config.backup_dir
 
         checkpoint = Path(config.checkpoint_path)
         if not checkpoint.is_absolute():
@@ -119,11 +121,12 @@ def create_app(config: Settings | None = None, *, database_url: str | None = Non
 
     app = FastAPI(title='WaferAI Vision API', lifespan=lifespan)
     errors.install(app)                     # 입력 검증 오류를 한국어 한 줄로
-    audit.install()                         # 로그인 · 잠금 · 발급 로그를 표준 출력으로
+    audit.install(app)                      # 로그인 · 잠금 · 발급 기록을 로그와 DB 에
     app.include_router(auth_routes.router)
     app.include_router(wafer_routes.router)
     app.include_router(admin_routes.router)
     app.include_router(model_routes.router)
+    app.include_router(system_routes.router)
 
     @app.get('/')
     def home():
@@ -143,7 +146,7 @@ def create_app(config: Settings | None = None, *, database_url: str | None = Non
             'metadata': app.state.predictor.metadata,
             'model_version': active.file_sha256 if active else None,
             'classes': CLASSES,
-            'thresholds': wafer_routes.load_thresholds(session).as_dict(),
+            'thresholds': wafer_routes.load_thresholds(session, app.state.predictor).as_dict(),
             'accepted_formats': sorted(wafer_routes.ARRAY_SUFFIXES
                                        | wafer_routes.IMAGE_SUFFIXES),
         }

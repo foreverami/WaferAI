@@ -6,7 +6,8 @@
  */
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 
-import { ROLE_LABEL, useAuth } from '../auth'
+import { useAuth } from '../authContext'
+import { ROLE_LABEL } from '../roles'
 
 const TABS = [
   { to: '/', label: '대시보드', end: true },

@@ -60,12 +60,22 @@ class PredictionTests(ApiTestCase):
     def test_invalid_map_rejected(self):
         self.assertEqual(self.upload('bad.json', b'[[3]]').status_code, 422)
 
-    def test_foreign_palette_rejected(self):
+    def test_foreign_palette_is_never_auto_passed(self):
+        """학습 색이 아닌 이미지를 조용히 잘못 읽어 자동 통과시키면 안 된다 — 사람에게 보낸다."""
         rgb = np.zeros((64, 64, 3), dtype=np.uint8)
         rgb[10:50, 10:50] = (255, 0, 0)
         response = self.upload('red.png', encode_png(rgb), 'image/png')
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertTrue(body['requires_human_review'])
+        self.assertIn(body['decision_path'], ('REVIEW_NEEDED', 'OUT_OF_SCOPE'))
+
+    def test_photo_like_image_rejected(self):
+        rng = np.random.default_rng(0)
+        noise = rng.integers(0, 256, size=(96, 96, 3), dtype=np.uint8)
+        response = self.upload('photo.png', encode_png(noise), 'image/png')
         self.assertEqual(response.status_code, 422)
-        self.assertIn('색 체계', response.json()['detail'])
+        self.assertIn('세 가지 색', response.json()['detail'])
 
     def test_unsupported_extension_rejected(self):
         self.assertEqual(self.upload('notes.txt', b'0 1 2', 'text/plain').status_code, 422)
@@ -170,8 +180,10 @@ class ThresholdEffectTests(ApiTestCase):
         # 그보다 높은 값은 서버가 거부하므로(아래 ConfidenceProfileTests) 상한을 그대로 쓴다.
         profile = self.client.get('/api/settings/thresholds').json()['confidence_profile']
         ceiling = profile['confidence_max'] if profile else 0.999
+        # 클래스별 권장 기준을 쓰면 단일 임계값이 판정에 쓰이지 않는다 — 끄고 시험한다
         response = self.client.put('/api/settings/thresholds',
-                                   json={'confidence': ceiling, 'high_density': 0.8})
+                                   json={'confidence': ceiling, 'high_density': 0.8,
+                                         'use_class_thresholds': False})
         self.assertEqual(response.status_code, 200, response.text)
         self.logout()
 

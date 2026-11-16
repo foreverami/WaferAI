@@ -22,7 +22,8 @@ MODEL_NAME = 'coatnet_0_rw_224.sw_in1k'
 NUM_CLASSES = len(CLASSES)
 
 #: 체크포인트가 담을 수 있는 메타데이터. split_id 가 없으면 1학기 모델이다(테스트 셋 없음).
-METADATA_KEYS = ('epoch', 'val_acc', 'split_id', 'test_metrics')
+#: calibration 은 확률 보정 온도 · 클래스별 권장 임계값 (scripts/calibrate.py 가 심는다).
+METADATA_KEYS = ('epoch', 'val_acc', 'split_id', 'test_metrics', 'calibration')
 
 logger = logging.getLogger(__name__)
 
@@ -127,11 +128,13 @@ def _parse_onnx_metadata(raw) -> dict:
     """익스포트 때 심어둔 메타데이터(ModelMetadata)를 파이썬 값으로 바꾼다."""
     custom = raw.custom_metadata_map or {}
     epoch, val_acc, metrics = custom.get('epoch'), custom.get('val_acc'), custom.get('test_metrics')
+    calibration = custom.get('calibration')
     return {
         'epoch': int(epoch) if epoch is not None else None,
         'val_acc': float(val_acc) if val_acc is not None else None,
         'split_id': custom.get('split_id'),
         'test_metrics': json.loads(metrics) if metrics else None,
+        'calibration': json.loads(calibration) if calibration else None,
         'source_sha256': custom.get('source_sha256'),
     }
 

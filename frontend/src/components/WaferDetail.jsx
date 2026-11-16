@@ -29,12 +29,10 @@ export default function WaferDetail({ waferId, onClose, onReviewed }) {
   const [manualLabel, setManualLabel] = useState('')
   const [memo, setMemo] = useState('')
 
+  // 다른 웨이퍼를 열 때는 부모가 key 를 바꿔 이 컴포넌트를 새로 만든다. 그래서 여기서 상태를
+  // 되돌릴 필요가 없다 (효과 안에서 상태를 바로 바꾸면 화면을 한 번 더 그린다).
   useEffect(() => {
     let cancelled = false
-    setWafer(null)
-    setError(null)
-    setHeatmap('loading')
-    setAttempt(0)
     api
       .record(waferId)
       .then((data) => !cancelled && setWafer(data))
@@ -175,6 +173,23 @@ export default function WaferDetail({ waferId, onClose, onReviewed }) {
                   <dt>처리 시각</dt>
                   <dd className="text-ink">{formatTime(wafer.processed_at)}</dd>
                 </div>
+                {wafer.input_info?.applied_confidence != null && (
+                  <div className="flex justify-between">
+                    <dt>적용된 확신도 기준</dt>
+                    <dd className="tabular-nums text-ink">
+                      {formatPercent(wafer.input_info.applied_confidence, 1)}
+                      {wafer.input_info.temperature ? ' · 보정됨' : ''}
+                    </dd>
+                  </div>
+                )}
+                {wafer.input_info?.palette && wafer.input_info.palette.name !== 'training' && (
+                  <div className="flex justify-between">
+                    <dt>색 체계</dt>
+                    <dd className="text-ink">
+                      {wafer.input_info.palette.guessed ? '추정' : wafer.input_info.palette.name}
+                    </dd>
+                  </div>
+                )}
                 <div className="flex justify-between gap-4">
                   <dt>모델 버전</dt>
                   <dd className="truncate font-mono text-ink">
@@ -182,6 +197,15 @@ export default function WaferDetail({ waferId, onClose, onReviewed }) {
                   </dd>
                 </div>
               </dl>
+
+              {wafer.input_info?.review_reasons?.length > 0 && (
+                <div className="mt-3 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-danger">
+                  <p className="mb-1 font-medium">사람 확인이 필요한 이유</p>
+                  {wafer.input_info.review_reasons.map((reason) => (
+                    <p key={reason}>{reason}</p>
+                  ))}
+                </div>
+              )}
 
               {wafer.input_info?.warnings?.length > 0 && (
                 <div className="mt-3 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">

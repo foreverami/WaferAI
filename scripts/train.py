@@ -9,6 +9,9 @@
     # 동작 확인용 짧은 실행
     python3 -m scripts.train --limit 256 --epochs 1
 
+    # 약한 클래스 보강 — 테스트 F1 이 낮은 클래스(Loc 0.786 · Scratch 0.820 · Donut 0.839)를 더 자주 보여 준다
+    python3 -m scripts.train --init runs/<이전>/model.pth --epochs 6 --oversample Loc=2,Scratch=2,Donut=3,Edge-Loc=1.5
+
 하이퍼파라미터는 1학기 Colab 학습(training_reference.py)과 같다. 바뀐 것은 데이터 분할뿐이라,
 결과 차이는 분할과 데이터의 차이로 읽을 수 있다.
 
@@ -45,9 +48,46 @@ GRAD_CLIP = 1.0
 PATIENCE = 5
 
 
-def build_datasets(dataset, reviews_path, limit, seed):
+def parse_oversample(spec: str | None) -> dict[int, float]:
+    """'Loc=2,Donut=3' → {클래스 번호: 배수}. 배수는 1 이상."""
+    if not spec:
+        return {}
+    factors = {}
+    for part in spec.split(','):
+        name, _, value = part.partition('=')
+        name = name.strip()
+        if name not in CLASS_NAMES:
+            raise SystemExit(f'--oversample: 알 수 없는 클래스 {name!r} (가능: {", ".join(CLASS_NAMES)})')
+        factor = float(value)
+        if factor < 1:
+            raise SystemExit(f'--oversample: 배수는 1 이상이어야 합니다 ({name}={value})')
+        factors[CLASS_NAMES.index(name)] = factor
+    return factors
+
+
+def oversample(indices: np.ndarray, labels: np.ndarray, factors: dict[int, float], seed: int) -> np.ndarray:
+    """지정한 클래스의 샘플을 배수만큼 반복한다(소수 배수는 무작위로 일부만 한 번 더).
+
+    같은 맵이 여러 번 들어가도 학습 증강(뒤집기 · 회전)이 매번 달라 똑같은 입력이 되지 않는다.
+    검증 · 테스트는 건드리지 않는다 — 평가 분포가 바뀌면 수치를 비교할 수 없다.
+    """
+    if not factors:
+        return indices
+    rng = np.random.default_rng(seed)
+    extra = []
+    for k, factor in factors.items():
+        members = indices[labels[indices] == k]
+        whole, fraction = int(factor) - 1, factor - int(factor)
+        extra += [members] * whole
+        if fraction > 0 and len(members):
+            extra.append(rng.choice(members, size=int(round(len(members) * fraction)), replace=False))
+    return np.sort(np.concatenate([indices, *extra])) if extra else indices
+
+
+def build_datasets(dataset, reviews_path, limit, seed, factors=None):
     """학습·검증에 쓸 (맵, 라벨) 목록. 테스트 셋은 여기서 절대 건드리지 않는다."""
     train_idx = balanced(dataset.indices('train'), dataset.labels, seed)
+    train_idx = oversample(train_idx, dataset.labels, factors or {}, seed)
     val_idx = balanced(dataset.indices('val'), dataset.labels, seed + 1)
     if limit:
         rng = np.random.default_rng(seed)
@@ -155,6 +195,7 @@ def main() -> None:
     parser.add_argument('--workers', type=int, default=0)
     parser.add_argument('--limit', type=int, help='학습 샘플 수 상한 (동작 확인용)')
     parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--oversample', help="약한 클래스를 배수만큼 더 보여 준다. 예: 'Loc=2,Scratch=2,Donut=3'")
     parser.add_argument('--output', help='결과 폴더 (기본 runs/<시각>)')
     args = parser.parse_args()
 
@@ -177,8 +218,11 @@ def main() -> None:
 
     print(f'[데이터] {args.data}', flush=True)
     dataset = load_training_set(args.data)
+    factors = parse_oversample(args.oversample)
     train_maps, train_labels, val_maps, val_labels, reviewed = build_datasets(
-        dataset, args.reviews, args.limit, args.seed)
+        dataset, args.reviews, args.limit, args.seed, factors)
+    if factors:
+        print('  보강: ' + ', '.join(f'{CLASS_NAMES[k]} ×{v:g}' for k, v in factors.items()), flush=True)
     print(f'  split_id {dataset.split_id} · 학습 {len(train_labels):,} (검토 라벨 {reviewed:,}) · '
           f'검증 {len(val_labels):,} · 테스트 {len(dataset.indices("test")):,} (학습에 쓰지 않음)',
           flush=True)

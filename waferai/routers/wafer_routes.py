@@ -33,15 +33,21 @@ DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 200
 
 
-def load_thresholds(session: Session) -> Thresholds:
-    """설정 테이블의 임계값. 없으면 코드 기본값."""
+def stored_settings(session: Session) -> dict:
+    """설정 테이블의 임계값 원본 (없으면 빈 dict)."""
     row = session.get(Setting, THRESHOLDS_KEY)
-    if row is None:
-        return Thresholds()
-    stored = dict(row.value)
-    stored.pop('updated_at', None)
-    stored.pop('updated_by', None)
-    return Thresholds(**stored)
+    stored = dict(row.value) if row is not None else {}
+    for key in ('updated_at', 'updated_by', 'class_confidence'):
+        stored.pop(key, None)
+    return stored
+
+
+def load_thresholds(session: Session, predictor=None) -> Thresholds:
+    """판정에 쓸 임계값. 설정 테이블 값 + (켜져 있으면) 모델이 권장하는 클래스별 임계값."""
+    stored = stored_settings(session)
+    use_classes = stored.pop('use_class_thresholds', True)
+    classes = predictor.recommended_class_thresholds() if (use_classes and predictor) else None
+    return Thresholds(**stored, class_confidence=classes or None)
 
 
 def _parse_array(raw: bytes, suffix: str) -> np.ndarray:
@@ -95,8 +101,18 @@ def predict(request: Request, file: UploadFile,
     wafer_map, input_info = read_upload(file)
     predictor = request.app.state.predictor
 
+    # 색을 추정해 읽은 이미지는 해석이 틀렸을 수 있다 — 무인 경로를 막고 사람에게 보낸다
+    palette = input_info.get('palette') or {}
+    force_review = ('색 체계를 추정해 읽은 이미지라 사람이 확인해야 합니다'
+                    if palette.get('guessed') else None)
     with request.app.state.predict_lock:
-        result = predictor.predict(wafer_map, load_thresholds(session))
+        result = predictor.predict(wafer_map, load_thresholds(session, predictor),
+                                   force_review=force_review)
+    input_info = {**input_info,
+                  'review_reasons': result.get('review_reasons') or [],
+                  'shape_check': result.get('shape_check'),
+                  'temperature': result.get('temperature'),
+                  'applied_confidence': result.get('applied_confidence')}
 
     wafer = WaferResult(
         wafer_id=str(uuid.uuid4()),
@@ -131,6 +147,49 @@ def records(session: Session = Depends(get_session),
     if review_only:
         statement = statement.where(WaferResult.requires_human_review.is_(True))
     return [WaferSummary.model_validate(row) for row in session.execute(statement).scalars()]
+
+
+EXPORT_LIMIT = 20000
+EXPORT_COLUMNS = ['wafer_id', 'processed_at', 'filename', 'input_type', 'final_class', 'decision_path',
+                  'confidence', 'defect_ratio', 'requires_human_review', 'uploaded_by',
+                  'reviewed_class', 'reviewer', 'reviewed_at', 'ai_agreed']
+
+
+@router.get('/records/export')
+def export_records(session: Session = Depends(get_session),
+                   _: User = Depends(current_user),
+                   review_only: bool = Query(False, description='검토 대기 건만'),
+                   days: int | None = Query(None, ge=1, le=3650, description='최근 며칠')):
+    """판정 기록 CSV. 엑셀에서 한글이 깨지지 않도록 UTF-8 BOM 을 붙인다."""
+    import csv
+    from datetime import timedelta
+
+    from waferai.models import utcnow
+
+    statement = (select(WaferResult).options(selectinload(WaferResult.reviews))
+                 .order_by(WaferResult.processed_at.desc()).limit(EXPORT_LIMIT))
+    if review_only:
+        statement = statement.where(WaferResult.requires_human_review.is_(True))
+    if days:
+        statement = statement.where(WaferResult.processed_at >= utcnow() - timedelta(days=days))
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(EXPORT_COLUMNS)
+    for row in session.execute(statement).scalars():
+        review = row.latest_review
+        writer.writerow([
+            row.wafer_id, row.processed_at.isoformat(), row.filename or '', row.input_type,
+            row.final_class, row.decision_path, f'{row.confidence:.4f}', f'{row.defect_ratio:.4f}',
+            int(row.requires_human_review), row.uploaded_by or '',
+            review.final_class if review else '', review.reviewer_id if review else '',
+            review.reviewed_at.isoformat() if review else '',
+            '' if review is None else int(review.final_class == row.final_class),
+        ])
+    payload = '\ufeff' + buffer.getvalue()
+    return Response(payload.encode('utf-8'), media_type='text/csv; charset=utf-8', headers={
+        'Content-Disposition': 'attachment; filename="waferai-records.csv"',
+        'Cache-Control': 'no-store'})
 
 
 @router.get('/records/{wafer_id}', response_model=WaferDetail)

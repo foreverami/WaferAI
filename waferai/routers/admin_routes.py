@@ -13,7 +13,7 @@ from waferai.auth import (check_password_policy, get_session, hash_password, req
                           require_senior)
 from waferai.decision import Thresholds
 from waferai.models import Setting, THRESHOLDS_KEY, User, utcnow
-from waferai.routers.wafer_routes import load_thresholds
+from waferai.routers.wafer_routes import load_thresholds, stored_settings
 from waferai.schemas import TemporaryPassword, ThresholdsIn, ThresholdsOut, UserCreate, UserOut
 
 router = APIRouter(prefix='/api', tags=['admin'])
@@ -131,15 +131,24 @@ def _confidence_profile(request: Request) -> dict | None:
     return metrics.get('confidence_profile')
 
 
+def _thresholds_out(request: Request, session: Session) -> ThresholdsOut:
+    predictor = getattr(request.app.state, 'predictor', None)
+    row = session.get(Setting, THRESHOLDS_KEY)
+    thresholds = load_thresholds(session, predictor)
+    return ThresholdsOut(**thresholds.as_dict(),
+                         use_class_thresholds=stored_settings(session).get('use_class_thresholds', True),
+                         updated_at=row.updated_at if row else None,
+                         updated_by=row.updated_by if row else None,
+                         confidence_profile=_confidence_profile(request),
+                         recommended_class_thresholds=(predictor.recommended_class_thresholds()
+                                                       if predictor else None),
+                         temperature=predictor.temperature if predictor else None)
+
+
 @router.get('/settings/thresholds', response_model=ThresholdsOut)
 def get_thresholds(request: Request, session: Session = Depends(get_session),
                    _: User = Depends(require_senior)):
-    row = session.get(Setting, THRESHOLDS_KEY)
-    thresholds = load_thresholds(session)
-    return ThresholdsOut(**thresholds.as_dict(),
-                         updated_at=row.updated_at if row else None,
-                         updated_by=row.updated_by if row else None,
-                         confidence_profile=_confidence_profile(request))
+    return _thresholds_out(request, session)
 
 
 @router.put('/settings/thresholds', response_model=ThresholdsOut)
@@ -160,14 +169,18 @@ def put_thresholds(body: ThresholdsIn, request: Request,
         raise HTTPException(422, f"이 모델이 내는 확신도는 최대 {profile['confidence_max']:.2f} 입니다. "
                                  '그보다 높이면 모든 웨이퍼가 검토로 가므로 받지 않습니다')
 
+    # 클래스별 값은 저장하지 않는다 — 모델이 싣고 온다. 저장하는 것은 쓸지 말지뿐이다.
+    value = {**thresholds.as_dict(), 'use_class_thresholds': body.use_class_thresholds}
+    value.pop('class_confidence', None)
     row = session.get(Setting, THRESHOLDS_KEY)
     if row is None:
-        row = Setting(key=THRESHOLDS_KEY, value=thresholds.as_dict())
+        row = Setting(key=THRESHOLDS_KEY, value=value)
     else:
-        row.value = thresholds.as_dict()
+        row.value = value
     row.updated_at = utcnow()
     row.updated_by = user.employee_id
     session.add(row)
     session.flush()
-    return ThresholdsOut(**thresholds.as_dict(), updated_at=row.updated_at,
-                         updated_by=row.updated_by, confidence_profile=profile)
+    audit.log('settings.thresholds', request, by=user.employee_id, confidence=body.confidence,
+              use_class_thresholds=body.use_class_thresholds)
+    return _thresholds_out(request, session)

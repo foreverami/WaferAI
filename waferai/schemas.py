@@ -126,6 +126,8 @@ class ThresholdsIn(BaseModel):
     low_density: float | None = Field(default=None, ge=0.0, le=1.0)
     high_density: float | None = Field(default=0.80, ge=0.0, le=1.0)
     confidence: float = Field(default=0.80, ge=0.0, le=1.0)
+    #: 모델이 권장하는 클래스별 임계값을 쓴다. 끄면 confidence 하나로 모든 클래스를 자른다.
+    use_class_thresholds: bool = True
 
 
 class ConfidenceProfile(BaseModel):
@@ -141,6 +143,49 @@ class ThresholdsOut(ThresholdsIn):
     updated_by: str | None = None
     #: 재학습 파이프라인이 만든 모델에만 있다. 없으면 화면은 고정 상한(0.99)으로 돌아간다.
     confidence_profile: ConfidenceProfile | None = None
+    #: 지금 판정에 쓰이는 클래스별 임계값 (use_class_thresholds 가 꺼졌거나 모델에 없으면 None)
+    class_confidence: dict[str, float] | None = None
+    #: 모델이 싣고 온 권장값 — 켜고 끄기 전에 화면이 보여 준다
+    recommended_class_thresholds: dict[str, float] | None = None
+    temperature: float | None = None
+
+
+class TrendWeek(BaseModel):
+    week: str                     # 그 주 월요일 (YYYY-MM-DD)
+    uploads: int
+    auto_pass: int
+    rule_base: int
+    review_needed: int
+    out_of_scope: int
+    reviewed: int
+    ai_agreed: int                # 검토 결과가 AI 최종 판정과 같은 건
+
+
+class TrendOut(BaseModel):
+    weeks: list[TrendWeek]
+
+
+class AuditEventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    event_id: int
+    at: datetime
+    event: str
+    employee_id: str | None
+    actor: str | None
+    ip: str | None
+    detail: dict | None
+
+
+class SystemHealth(BaseModel):
+    disk_total_gb: float
+    disk_free_gb: float
+    database_rows: dict[str, int]
+    backups: int
+    last_backup_at: datetime | None
+    last_backup_mb: float | None
+    last_backup_age_hours: float | None = None
+    backup_dir: str | None
 
 
 class AiModelOut(BaseModel):

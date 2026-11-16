@@ -9,7 +9,8 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { api, formatPercent, formatTime } from '../api'
-import { useAuth } from '../auth'
+import { useAuth } from '../authContext'
+import TrendChart from '../components/TrendChart'
 import { EmptyNote, ErrorNote, Spinner } from '../components/ui'
 
 const STATUS = {
@@ -59,6 +60,88 @@ function TestMetrics({ model }) {
   )
 }
 
+const EFFECT_ROWS = [
+  ['검토 비율', 'review_rate', (v) => formatPercent(v, 2)],
+  ['틀린 채 자동 통과', 'escaped', (v) => `${v}건`],
+  ['결함을 정상으로', 'missed_defect', (v) => `${v}건`],
+  ['자동 통과의 정확도', 'unattended_accuracy', (v) => formatPercent(v, 2)],
+]
+
+/** 확률 보정과 판정 기준 조정의 효과 — 학습에도 보정에도 쓰지 않은 테스트 셋에서 잰 값. */
+function CalibrationCard({ calibration }) {
+  if (!calibration?.test_effect) return null
+  const { before, after } = calibration.test_effect
+  return (
+    <section className="space-y-3 rounded-xl border border-line bg-panel p-5">
+      <div>
+        <h3 className="font-semibold">확률 보정 · 판정 기준</h3>
+        <p className="mt-0.5 text-xs text-muted">
+          검증 분할로 맞추고 테스트 셋 {before.n.toLocaleString()}건으로 잰 값입니다. 온도 T ={' '}
+          {calibration.temperature} · 확신도 보정 오차(ECE) {calibration.ece?.test_before} →{' '}
+          {calibration.ece?.test_after}
+        </p>
+      </div>
+      <table className="w-full text-sm">
+        <thead className="text-left text-xs text-muted">
+          <tr>
+            <th className="py-1.5 font-medium" />
+            <th className="py-1.5 text-right font-medium">보정 전 (0.80)</th>
+            <th className="py-1.5 text-right font-medium">지금</th>
+          </tr>
+        </thead>
+        <tbody>
+          {EFFECT_ROWS.map(([label, key, format]) => (
+            <tr key={key} className="border-t border-line">
+              <td className="py-1.5 text-muted">{label}</td>
+              <td className="py-1.5 text-right tabular-nums">{format(before[key])}</td>
+              <td className="py-1.5 text-right font-medium tabular-nums">{format(after[key])}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="text-xs text-muted">
+        검토가 조금 늘어나는 대신 사람 없이 틀린 채 나가는 웨이퍼가 줄어듭니다. 설정 화면에서 클래스별
+        기준을 끄면 단일 임계값으로 돌아갑니다.
+      </p>
+    </section>
+  )
+}
+
+/** 서버 상태 — 디스크와 백업. 따로 감시 도구가 없는 배포라 관리자가 화면에서 확인한다. */
+function HealthCard({ health }) {
+  if (!health) return null
+  // 경과 시간은 서버가 잰다 (화면에서 현재 시각을 읽으면 그릴 때마다 값이 바뀐다)
+  const backupStale = health.last_backup_age_hours == null || health.last_backup_age_hours > 36
+  const diskLow = health.disk_free_gb < 5
+  return (
+    <section className="space-y-3 rounded-xl border border-line bg-panel p-5">
+      <h3 className="font-semibold">서버 상태</h3>
+      <dl className="grid grid-cols-2 gap-3 text-sm">
+        <div className={`rounded-lg border px-3 py-2 ${diskLow ? 'border-danger/40 bg-danger/10' : 'border-line'}`}>
+          <dt className="text-xs text-muted">디스크 남은 공간</dt>
+          <dd className="mt-0.5 font-semibold tabular-nums">
+            {health.disk_free_gb} / {health.disk_total_gb} GB{diskLow ? ' · 부족' : ''}
+          </dd>
+        </div>
+        <div className={`rounded-lg border px-3 py-2 ${backupStale ? 'border-warn/40 bg-warn/10' : 'border-line'}`}>
+          <dt className="text-xs text-muted">마지막 DB 백업</dt>
+          <dd className="mt-0.5 font-semibold">
+            {health.last_backup_at
+              ? `${formatTime(health.last_backup_at)} · ${health.last_backup_mb} MB`
+              : '없음'}
+            {backupStale ? ' · 확인 필요' : ''}
+          </dd>
+        </div>
+      </dl>
+      <p className="text-xs text-muted tabular-nums">
+        보관 중인 백업 {health.backups}개 · 판정 기록 {health.database_rows.wafer_result.toLocaleString()}건 ·
+        검토 {health.database_rows.review_result.toLocaleString()}건 · 감사 기록{' '}
+        {health.database_rows.audit_events.toLocaleString()}건
+      </p>
+    </section>
+  )
+}
+
 export default function Models() {
   const { can } = useAuth()
   const isAdmin = can('admin')
@@ -67,17 +150,26 @@ export default function Models() {
   const [jobs, setJobs] = useState(null)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [trend, setTrend] = useState(null)
+  const [calibration, setCalibration] = useState(null)
+  const [health, setHealth] = useState(null)
 
+  // 효과 안에서 상태를 동기적으로 바꾸지 않는다. 오류 초기화도 응답이 온 뒤에 한다.
   const load = useCallback(() => {
-    setError(null)
-    Promise.all([api.models(), api.retrainOverview(), api.retrainJobs()])
-      .then(([modelList, state, jobList]) => {
+    Promise.all([api.models(), api.retrainOverview(), api.retrainJobs(), api.trend(12), api.status()])
+      .then(([modelList, state, jobList, trendData, status]) => {
+        setError(null)
         setModels(modelList)
         setOverview(state)
         setJobs(jobList)
+        setTrend(trendData.weeks)
+        setCalibration(status.metadata?.calibration || null)
       })
       .catch((caught) => setError(caught.detail || '모델 정보를 불러오지 못했습니다'))
-  }, [])
+    if (isAdmin) {
+      api.systemHealth().then(setHealth).catch(() => setHealth(null))
+    }
+  }, [isAdmin])
 
   useEffect(load, [load])
 
@@ -237,6 +329,26 @@ export default function Models() {
             )
           )}
         </section>
+      </div>
+
+      {/* 성능 추이 */}
+      <section className="space-y-3 rounded-xl border border-line bg-panel p-5">
+        <div>
+          <h3 className="font-semibold">성능 추이</h3>
+          <p className="mt-0.5 text-xs text-muted">
+            최근 12주 동안 주마다 올라온 웨이퍼의 처리 경로와, 사람이 검토한 건 중 AI 판정과 같았던 비율입니다.
+          </p>
+        </div>
+        {trend && trend.length > 0 ? (
+          <TrendChart weeks={trend} />
+        ) : (
+          <EmptyNote>최근 12주 동안 처리한 웨이퍼가 없습니다.</EmptyNote>
+        )}
+      </section>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <CalibrationCard calibration={calibration} />
+        {isAdmin && <HealthCard health={health} />}
       </div>
 
       {/* 재학습 작업 이력 */}

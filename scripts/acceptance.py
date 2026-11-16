@@ -106,9 +106,11 @@ def main() -> None:
             body = r.json()
             results[item['file']] = body
             CREATED['wafers'].append(body['wafer_id'])
+            # 기대 경로는 manifest 에 적어 둔다 (판정 기준이 바뀌면 manifest 를 다시 만든다).
             # 고밀도 규칙은 확신도보다 먼저 본다 — Near-full 은 자동 통과가 아니라 규칙 확정이 맞다
-            expected_path = ('RULE_BASE_NEAR_FULL' if item['label'] == 'Near-full' or item['file'].startswith('nearfull')
-                             else 'REVIEW_NEEDED' if item['file'].startswith('review') else 'AUTO_PASS')
+            expected_path = item.get('expected_path') or (
+                'RULE_BASE_NEAR_FULL' if item['label'] == 'Near-full' or item['file'].startswith('nearfull')
+                else 'REVIEW_NEEDED' if item['file'].startswith('review') else 'AUTO_PASS')
             ok_path = body['decision_path'] == expected_path
             ok_class = body['final_class'] == item['label'] or body['decision_path'] == 'REVIEW_NEEDED'
             check(f"판정 {item['file']}", ok_path and ok_class,
@@ -128,8 +130,24 @@ def main() -> None:
         same = all(isinstance(a, tuple) and a[0] == base_answer[0] and abs(a[1] - base_answer[1]) < 0.01 for a in answers.values())
         check('csv · json · png 업로드가 npy 와 같은 답 (±1%p)', same, f'{base_answer} vs {answers}')
 
+        # 다른 색상표(viridis) 이미지는 학습 색으로 바꿔 읽고 경고를 붙인다
+        r = upload(c, samples / 'palette_viridis.png', 'image/png')
+        info = r.json().get('input_info') or {} if r.status_code == 200 else {}
+        check('viridis 이미지 → 학습 색으로 바꿔 읽음 · 경고', r.status_code == 200 and (info.get('palette') or {}).get('name') == 'viridis'
+              and info.get('warnings'), f"{r.status_code} {(info.get('palette') or {})}")
+        if r.status_code == 200:
+            CREATED['wafers'].append(r.json()['wafer_id'])
+        # 웨이퍼처럼 생기지 않은 배열은 판정하지 않고 사람에게 (판정 불가)
+        r = upload(c, samples / 'oos_checkerboard.json', 'application/json')
+        body = r.json() if r.status_code == 200 else {}
+        check('웨이퍼가 아닌 입력 → 판정 불가 · 검토 대기 · 이유', r.status_code == 200 and body.get('decision_path') == 'OUT_OF_SCOPE'
+              and body.get('requires_human_review') and (body.get('input_info') or {}).get('review_reasons'),
+              f"{r.status_code} {body.get('decision_path')}")
+        if r.status_code == 200:
+            CREATED['wafers'].append(body['wafer_id'])
+
         # 잘못된 입력은 이유와 함께 거절
-        for name, expect in (('bad_other_palette.png', (400, 415, 422)), ('bad_not_an_image.png', (400, 415, 422)),
+        for name, expect in (('bad_photo_like.png', (400, 415, 422)), ('bad_not_an_image.png', (400, 415, 422)),
                              ('bad_values.json', (400, 415, 422))):
             r = upload(c, samples / name)
             detail = r.json().get('detail', '') if r.headers.get('content-type', '').startswith('application/json') else r.text
@@ -182,6 +200,11 @@ def main() -> None:
               and d['final_class'] == results[manifest[0]['file']]['final_class'] and not d['requires_human_review'],
               f"{r.status_code} final={d.get('final_class')} latest={latest.get('final_class')} {r.text[:60] if r.status_code != 200 else ''}")
         r = c.post(f'/api/records/{first}/review', json={'label': 'NotAClass'})
+        export = c.get('/api/records/export')       # r 은 아래 검사가 쓴다 — 덮어쓰지 않는다
+        lines = export.content.decode('utf-8').lstrip('\ufeff').splitlines() if export.status_code == 200 else []
+        check('기록 CSV 내려받기 (BOM · 머리글 · 올린 건 포함)', export.status_code == 200 and export.content[:3] == b'\xef\xbb\xbf'
+              and lines and lines[0].startswith('wafer_id') and any(CREATED['wafers'][0] in line for line in lines),
+              f'{len(lines) - 1}행')
         check('없는 클래스 라벨 → 422 한국어', r.status_code == 422 and isinstance(r.json().get('detail'), str), r.json().get('detail', '')[:60])
 
         # 비밀번호 변경 → 새 세션
@@ -216,7 +239,15 @@ def main() -> None:
         check('모델 목록 · 활성 모델 1개 · 테스트 성적 있음', r.status_code == 200 and len(active) == 1 and active[0].get('test_metrics'), f"{active and active[0]['version']} split={active and active[0].get('split_id')}")
         r = c.get('/api/models/retrain')
         check('재학습 현황 조회', r.status_code == 200 and 'threshold' in json.dumps(r.json()), json.dumps(r.json(), ensure_ascii=False)[:80])
+        body = c.get('/api/settings/thresholds').json()
+        check('모델 보정 · 클래스별 권장 기준 사용 중', body.get('temperature') and body.get('use_class_thresholds')
+              and body.get('class_confidence'), f"T={body.get('temperature')} none={(body.get('class_confidence') or {}).get('none')}")
+        r = c.get('/api/stats/trend?weeks=4')
+        weeks = r.json().get('weeks', []) if r.status_code == 200 else []
+        check('성능 추이 (주별 경로 · AI 일치)', r.status_code == 200 and weeks and weeks[-1]['uploads'] > 0,
+              f"이번 주 {weeks[-1] if weeks else '-'}")
         check('수석 → 계정 목록 403', c.get('/api/users').status_code == 403)
+        check('수석 → 보안 기록 403', c.get('/api/audit').status_code == 403)
         check('수석 → 재학습 요청 403', c.post('/api/models/retrain').status_code == 403)
         r = c.get('/api/status')
         check('상태 API (모델 · 임계값 · 허용 형식)', r.status_code == 200 and r.json()['model_ready'] and r.json()['accepted_formats'])
@@ -276,6 +307,13 @@ def main() -> None:
         with client(base) as t:
             after = t.post('/api/auth/login', json={'employee_id': tmp_id, 'password': 'tmp-pass-67890'}).status_code
         check('5회 실패 → 429 잠김 → 관리자 해제 → 로그인', codes == [401] * 5 and locked.status_code == 429 and unlocked.status_code == 200 and after == 200, f'{codes}/{locked.status_code}/{after}')
+        events = c.get(f'/api/audit?employee_id={tmp_id}&limit=200').json()
+        kinds = {e['event'] for e in events}
+        check('보안 기록에 잠금 · 해제 · 발급이 남음', {'login.lock', 'user.unlock', 'password.reset'} <= kinds,
+              ', '.join(sorted(kinds))[:80])
+        r = c.get('/api/system/health')
+        check('서버 상태 (디스크 · 백업)', r.status_code == 200 and r.json()['disk_total_gb'] > 0,
+              f"남은 {r.json().get('disk_free_gb')}GB · 백업 {r.json().get('backups')}개" if r.status_code == 200 else str(r.status_code))
         check('자기 비밀번호 초기화 거부 → 422', c.post(f'/api/users/{adm[0]}/reset-password').status_code == 422)
         check('자기 계정 비활성화 거부 → 422', c.post(f'/api/users/{adm[0]}/deactivate').status_code == 422)
 

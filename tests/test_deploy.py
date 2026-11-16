@@ -253,6 +253,23 @@ class ComposeTests(unittest.TestCase):
         for secret in ('POSTGRES_PASSWORD', 'WAFERAI_SECRET_KEY'):
             self.assertRegex(text, r'\$\{' + secret + r':\?', f'{secret} 는 필수(:?)여야 합니다')
 
+    def test_backup_service_dumps_without_exposing_anything(self):
+        """자동 백업은 밖으로 포트를 열지 않고, DB 비밀번호는 .env 에서 필수로 받는다."""
+        backup = self.compose['services']['backup']
+        self.assertNotIn('ports', backup)
+        self.assertEqual(backup['image'], self.compose['services']['db']['image'])  # pg_dump 버전 일치
+        self.assertIn('./backups:/backups', backup['volumes'])
+        self.assertTrue((DEPLOY / 'backup-loop.sh').is_file())
+        self.assertIn(':?', backup['environment']['PGPASSWORD'])
+        api_volumes = self.compose['services']['api']['volumes']
+        self.assertIn('./backups:/app/backups:ro', api_volumes)
+
+    def test_backup_loop_is_valid_shell(self):
+        import subprocess
+
+        result = subprocess.run(['sh', '-n', str(DEPLOY / 'backup-loop.sh')], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_api_runs_in_production_mode(self):
         env = self.compose['services']['api']['environment']
         self.assertEqual(env['WAFERAI_ENV'], 'production')

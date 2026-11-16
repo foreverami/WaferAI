@@ -499,3 +499,25 @@ class DecisionSummaryTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class OversampleTests(unittest.TestCase):
+    """약한 클래스 보강 — 학습 분할에서만 반복하고, 검증 · 테스트는 그대로 둔다."""
+
+    def test_integer_and_fractional_factors(self):
+        from scripts.train import oversample, parse_oversample
+
+        labels = np.array([4] * 10 + [8] * 10)          # Loc 10, none 10
+        indices = np.arange(20)
+        factors = parse_oversample('Loc=2.5')
+        out = oversample(indices, labels, factors, seed=0)
+        self.assertEqual(int((labels[out] == 4).sum()), 25)
+        self.assertEqual(int((labels[out] == 8).sum()), 10)
+
+    def test_bad_specs_rejected(self):
+        from scripts.train import parse_oversample
+
+        with self.assertRaises(SystemExit):
+            parse_oversample('Nope=2')
+        with self.assertRaises(SystemExit):
+            parse_oversample('Loc=0.5')

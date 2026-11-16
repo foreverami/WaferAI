@@ -9,7 +9,8 @@
 import { useEffect, useState } from 'react'
 
 import { api, formatTime } from '../api'
-import { ROLE_LABEL, useAuth } from '../auth'
+import { useAuth } from '../authContext'
+import { ROLE_LABEL } from '../roles'
 import { EmptyNote, ErrorNote, Spinner } from '../components/ui'
 
 const ROLE_STYLE = {
@@ -513,6 +514,114 @@ function UserAdmin({ me }) {
   )
 }
 
+const AUDIT_FILTERS = [
+  ['', '전체'],
+  ['login', '로그인'],
+  ['password', '비밀번호'],
+  ['user', '계정 관리'],
+  ['settings', '설정'],
+]
+
+const AUDIT_LABEL = {
+  'login.ok': '로그인',
+  'login.fail': '로그인 실패',
+  'login.lock': '잠김',
+  'login.locked': '잠긴 계정 시도',
+  'login.inactive': '비활성 계정 시도',
+  logout: '로그아웃',
+  signup: '가입 신청',
+  'password.changed': '비밀번호 변경',
+  'password.change_fail': '비밀번호 변경 실패',
+  'password.reset': '임시 비밀번호 발급',
+  'user.create': '계정 생성',
+  'user.approve': '가입 승인',
+  'user.activate': '다시 활성화',
+  'user.deactivate': '비활성화',
+  'user.unlock': '잠금 해제',
+  'settings.thresholds': '임계값 변경',
+}
+
+const AUDIT_ALERT = new Set(['login.fail', 'login.lock', 'login.locked', 'password.change_fail'])
+
+/** 보안 기록 — 서버가 남긴 감사 기록을 관리자가 화면에서 본다. 비밀번호 · 토큰은 들어 있지 않다. */
+function AuditLog() {
+  const [filter, setFilter] = useState('')
+  const [events, setEvents] = useState(null)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    api
+      .audit({ event: filter, limit: 100 })
+      .then((list) => {
+        if (cancelled) return
+        setError(null)
+        setEvents(list)
+      })
+      .catch((caught) => !cancelled && setError(caught.detail || '보안 기록을 불러오지 못했습니다'))
+    return () => {
+      cancelled = true
+    }
+  }, [filter])
+
+  return (
+    <section className="space-y-3">
+      <div>
+        <h3 className="text-lg font-semibold">보안 기록</h3>
+        <p className="text-sm text-muted">
+          로그인 성공 · 실패 · 잠금, 가입 승인, 임시 비밀번호 발급, 임계값 변경을 최근 순서로 보여 줍니다.
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {AUDIT_FILTERS.map(([value, label]) => (
+          <button
+            key={value || 'all'}
+            onClick={() => setFilter(value)}
+            className={`rounded-full border px-3 py-1 text-sm transition-colors ${
+              filter === value ? 'border-brand bg-brand/15 text-brand' : 'border-line text-muted hover:text-ink'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <ErrorNote>{error}</ErrorNote>
+      {events === null ? (
+        !error && <Spinner />
+      ) : events.length === 0 ? (
+        <EmptyNote>기록이 없습니다.</EmptyNote>
+      ) : (
+        <div className="max-h-96 overflow-y-auto rounded-xl border border-line">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-panel text-left text-xs text-muted">
+              <tr>
+                <th className="px-4 py-2.5 font-medium">시각</th>
+                <th className="px-4 py-2.5 font-medium">일</th>
+                <th className="px-4 py-2.5 font-medium">대상 사번</th>
+                <th className="px-4 py-2.5 font-medium">처리한 사람</th>
+                <th className="px-4 py-2.5 font-medium">IP</th>
+              </tr>
+            </thead>
+            <tbody>
+              {events.map((item) => (
+                <tr key={item.event_id} className="border-t border-line">
+                  <td className="px-4 py-2 text-xs text-muted tabular-nums">{formatTime(item.at)}</td>
+                  <td className={`px-4 py-2 text-xs ${AUDIT_ALERT.has(item.event) ? 'font-medium text-danger' : ''}`}>
+                    {AUDIT_LABEL[item.event] || item.event}
+                  </td>
+                  <td className="px-4 py-2 font-mono text-xs">{item.employee_id || '-'}</td>
+                  <td className="px-4 py-2 font-mono text-xs">{item.actor || '-'}</td>
+                  <td className="px-4 py-2 font-mono text-xs text-muted">{item.ip || '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  )
+}
+
 export default function Account() {
   const { user, setUser, can } = useAuth()
 
@@ -531,6 +640,7 @@ export default function Account() {
       </div>
 
       {can('admin') && <UserAdmin me={user} />}
+      {can('admin') && <AuditLog />}
     </div>
   )
 }

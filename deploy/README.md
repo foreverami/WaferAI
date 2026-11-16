@@ -153,8 +153,9 @@ docker compose -f compose.yaml -f compose.https.yaml exec api \
 
 ## 보안 감사 로그
 
-로그인 성공 · 실패 · 잠금, 로그아웃, 가입 신청 · 승인 · 비활성화, 임시 비밀번호 발급, 잠금 해제가
-api 컨테이너 로그에 `audit` 접두어로 남는다. 비밀번호와 토큰은 적지 않는다.
+로그인 성공 · 실패 · 잠금, 로그아웃, 가입 신청 · 승인 · 비활성화, 임시 비밀번호 발급, 잠금 해제,
+임계값 변경이 api 컨테이너 로그에 `audit` 접두어로 남고, `audit_events` 테이블에도 쌓인다. 관리자는 웹
+화면 **계정 › 보안 기록** 에서 본다. 비밀번호와 토큰은 적지 않는다.
 
 ```sh
 docker compose -f compose.yaml -f compose.https.yaml logs api | grep ' audit '
@@ -171,9 +172,13 @@ IP 는 Nginx 가 넣는 `X-Real-IP` 다. 로그인 · 가입 신청 경로는 Ng
 
 ## 백업과 복원
 
+**자동 백업** — compose 의 `backup` 서비스가 24시간마다 DB 를 덤프해 `deploy/backups/` 에 쌓고 최근
+14개만 남긴다(`.env` 의 `BACKUP_INTERVAL_HOURS` · `BACKUP_KEEP`). 서버에 cron 을 걸 필요가 없다.
+마지막 백업 시각과 크기는 웹 화면 **모델 관리 › 서버 상태**(관리자)에 보이고, 36시간이 넘으면
+'확인 필요' 로 표시된다. 백업 서비스 로그: `docker compose logs backup`.
+
 ```sh
-./backup.sh                                # backups/waferai-날짜.dump, 최근 14개 유지
-# 매일 새벽 3시: 0 3 * * * cd /경로/deploy && ./backup.sh >> backups/backup.log 2>&1
+./backup.sh                                # 지금 바로 한 번 더 (수동) — 같은 폴더 · 같은 이름 규칙
 
 docker compose exec -T db pg_restore -U waferai -d waferai --clean --if-exists \
     < backups/waferai-YYYYMMDD-HHMMSS.dump
@@ -207,9 +212,27 @@ docker compose restart api        # 새 모델 등록 → 이전 모델 비활�
 
 ## 업데이트
 
+맥에서 한 줄로 — 커밋된 코드와 (바뀌었으면) 모델 파일을 올리고 컨테이너를 다시 만든다.
+모델 파일은 임시 이름으로 받은 뒤 옮겨서, 올리는 도중에 api 가 반쪽짜리 파일을 읽지 않는다.
+
+```sh
+sh deploy/deploy_update.sh                  # HOST=waferai-vm 기본
+```
+
+서버에서 직접 할 때:
+
 ```sh
 git pull
 cd deploy && docker compose up -d --build   # 마이그레이션은 api 가 기동하며 자동 적용
+```
+
+## 서버 경고 (Azure Monitor)
+
+서버가 꺼지거나 CPU · 메모리가 모자라면 메일로 알린다. 맥에서 `az login` 뒤 한 번 실행한다.
+디스크와 백업은 VM 지표로 볼 수 없어 웹 화면(모델 관리 › 서버 상태)에서 본다.
+
+```sh
+sh deploy/azure_alerts.sh 받을메일주소
 ```
 
 ## 문제 해결

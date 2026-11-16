@@ -1,9 +1,17 @@
 """렌더링된 웨이퍼 맵 이미지(PNG/JPG)를 0/1/2 맵으로 되돌린다.
 
 모델은 사진이 아니라 전기 검사 결과인 0/1/2 웨이퍼 맵으로 학습됐다. 이 모듈은
-학습과 같은 LUT 색(검정/초록/노랑)으로 그려진 이미지에 한해 색을 역으로 풀어
-`preprocess` 가 받을 수 있는 맵을 만든다. 색 체계가 다른 이미지나 웨이퍼 실물
-사진은 여기서 거부해야 하며, 조용히 잘못 해석하는 것이 가장 나쁜 실패다.
+웨이퍼 맵을 3색으로 그린 이미지의 색을 역으로 풀어 `preprocess` 가 받을 수 있는 맵을
+만든다. 조용히 잘못 해석하는 것이 가장 나쁜 실패라, 확신의 정도에 따라 셋으로 나눈다.
+
+    1. 학습 색(검정/초록/노랑)            그대로 읽는다.
+    2. 알려진 색상표(viridis, 회색조 등)   표의 순서대로 0/1/2 로 바꿔 읽는다. 경고만 붙인다.
+    3. 처음 보는 3색                       배경 = 테두리 색, 결함 = 다이 중 적은 쪽 색으로
+                                           *추정* 한다. 결과는 반드시 사람 검토로 보낸다
+                                           (palette.guessed). Near-full 처럼 결함이 더 많은
+                                           웨이퍼는 추정이 뒤집힐 수 있기 때문이다.
+
+3색으로 설명되지 않는 이미지(사진, 그라데이션)는 거부한다.
 
 주의 — 이중 리샘플링:
     렌더링 이미지는 이미 한 번 224 로 확대된 결과일 수 있다. 여기서 또 축소하면
@@ -30,6 +38,26 @@ SNAP_TOLERANCE = 140.0
 
 #: 허용 거리를 벗어난 픽셀의 최대 비율.
 MAX_UNMATCHED_RATIO = 0.02
+
+#: 학습 색으로 그린 이미지는 JPEG 로 저장해도 평균 색 차이가 한 자릿수다. 이보다 크면 허용 거리 안에
+#: 들어오더라도 '비슷한 다른 색' 으로 보고 색상표 해석으로 넘긴다 (노란 배경을 결함으로 읽는 사고 방지).
+MAX_TRAINING_MEAN_DISTANCE = 30.0
+
+
+#: 알려진 색상표 — 0/1/2 순서. matplotlib 으로 WM-811K 를 그리면 흔히 나오는 것들이다.
+KNOWN_PALETTES = {
+    'viridis': np.array([[68, 1, 84], [33, 145, 140], [253, 231, 37]], dtype=np.float32),
+    'gray': np.array([[0, 0, 0], [128, 128, 128], [255, 255, 255]], dtype=np.float32),
+    'gray_r': np.array([[255, 255, 255], [128, 128, 128], [0, 0, 0]], dtype=np.float32),
+}
+
+#: 3색 군집에서 중심과의 허용 거리, 그 밖 픽셀의 최대 비율
+CLUSTER_TOLERANCE = 60.0
+MAX_UNCLUSTERED_RATIO = 0.04
+#: 알려진 색상표와 군집 중심의 허용 거리
+PALETTE_MATCH_TOLERANCE = 45.0
+#: 추정 모드에서 결함(적은 쪽)이 다이의 이 비율을 넘으면 정상과 결함을 가릴 수 없다고 본다
+MAX_GUESSED_DEFECT_SHARE = 0.45
 
 
 class UnsupportedImage(ValueError):
@@ -89,14 +117,96 @@ def crop_to_content(wm: np.ndarray) -> np.ndarray:
     return wm[rows[0]:rows[-1] + 1, cols[0]:cols[-1] + 1]
 
 
+def three_colors(rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray, float]:
+    """이미지를 3색으로 군집한다. 반환: (군집 중심 3개, 픽셀별 군집 번호, 중심에서 먼 픽셀 비율)."""
+    import cv2
+
+    pixels = rgb.reshape(-1, 3).astype(np.float32)
+    sample = pixels[:: max(1, len(pixels) // 20000)]
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.5)
+    _, _, centers = cv2.kmeans(sample, 3, None, criteria, 3, cv2.KMEANS_PP_CENTERS)
+    distances = np.linalg.norm(pixels[:, None, :] - centers[None, :, :], axis=2)
+    labels = distances.argmin(axis=1)
+    far = float((distances.min(axis=1) > CLUSTER_TOLERANCE).mean())
+    return centers, labels.reshape(rgb.shape[:2]), far
+
+
+def corner_cluster(labels: np.ndarray) -> tuple[int, float]:
+    """네 모서리 조각에서 가장 많은 군집과 그 비율. 원형 웨이퍼의 모서리는 늘 배경이다."""
+    k = max(2, min(labels.shape) // 12)
+    corners = np.concatenate([labels[:k, :k].ravel(), labels[:k, -k:].ravel(),
+                              labels[-k:, :k].ravel(), labels[-k:, -k:].ravel()])
+    counts = np.bincount(corners, minlength=3)
+    return int(counts.argmax()), float(counts.max() / len(corners))
+
+
+def match_known_palette(centers: np.ndarray, labels: np.ndarray) -> tuple[str, np.ndarray] | None:
+    """군집 중심이 알려진 색상표와 맞고, 그 표의 배경색이 실제로 모서리에 있으면 (이름, 군집 → 0/1/2).
+
+    gray 와 gray_r 은 같은 세 색을 반대 순서로 쓴다. 색만 보면 둘 다 맞으므로 배경 위치로 가른다.
+    """
+    background, _ = corner_cluster(labels)
+    for name, palette in KNOWN_PALETTES.items():
+        distance = np.linalg.norm(centers[:, None, :] - palette[None, :, :], axis=2)
+        order = distance.argmin(axis=1)
+        if len(set(order.tolist())) != 3 or distance[np.arange(3), order].max() > PALETTE_MATCH_TOLERANCE:
+            continue
+        if order[background] == 0:
+            return name, order.astype(np.uint8)
+    return None
+
+
+def guess_palette(labels: np.ndarray) -> np.ndarray:
+    """처음 보는 3색: 배경 = 네 모서리의 색, 결함 = 나머지 둘 중 적은 쪽.
+
+    원형 웨이퍼는 둘러싼 사각형의 변에는 닿지만 모서리에는 닿지 않는다. 그래서 테두리 전체가
+    아니라 네 모서리 조각을 본다.
+    """
+    background, share = corner_cluster(labels)
+    if share < 0.75:
+        raise UnsupportedImage('배경색을 찾을 수 없습니다 — 웨이퍼 바깥(네 모서리)이 한 가지 색이어야 합니다')
+    others = [k for k in range(3) if k != background]
+    sizes = {k: int((labels == k).sum()) for k in others}
+    defect = min(others, key=sizes.get)
+    normal = max(others, key=sizes.get)
+    share = sizes[defect] / max(1, sizes[defect] + sizes[normal])
+    if share > MAX_GUESSED_DEFECT_SHARE:
+        raise UnsupportedImage(
+            f'정상과 결함 색을 구분할 수 없습니다 (두 색이 {share:.0%} 대 {1 - share:.0%}). '
+            '학습 색(검정/초록/노랑)이나 viridis 로 그린 이미지를 올려주세요')
+    mapping = np.zeros(3, dtype=np.uint8)
+    mapping[normal], mapping[defect] = 1, 2
+    return mapping
+
+
+def read_palette(rgb: np.ndarray) -> tuple[np.ndarray, dict]:
+    """학습 색이 아닌 이미지 → (0/1/2 인덱스, 색상표 정보). 3색이 아니면 거부한다."""
+    centers, labels, far = three_colors(rgb)
+    if far > MAX_UNCLUSTERED_RATIO:
+        raise UnsupportedImage(
+            f'세 가지 색으로 그린 웨이퍼 맵이 아닙니다 — 세 색에서 벗어난 픽셀 {far:.1%}. '
+            '실물 사진이나 그라데이션 이미지는 판정할 수 없습니다')
+    known = match_known_palette(centers, labels)
+    if known:
+        name, mapping = known
+        return mapping[labels], {'name': name, 'guessed': False, 'unclustered_ratio': round(far, 6)}
+    mapping = guess_palette(labels)
+    return mapping[labels], {'name': 'unknown', 'guessed': True, 'unclustered_ratio': round(far, 6)}
+
+
 def image_to_wafer_map(data: bytes) -> tuple[np.ndarray, dict]:
     """렌더링 이미지 → (0/1/2 맵, 진단 정보)."""
     rgb = decode_image(data)
     indices, unmatched_ratio, mean_distance = snap_to_lut(rgb)
-    if unmatched_ratio > MAX_UNMATCHED_RATIO:
-        raise UnsupportedImage(
-            f'학습에 쓰인 색 체계(검정 배경 / 초록 정상 / 노랑 결함)와 다릅니다 — '
-            f'팔레트 밖 픽셀 {unmatched_ratio:.1%}. 웨이퍼 맵 렌더링 이미지를 올려주세요')
+    palette = {'name': 'training', 'guessed': False}
+    warnings = []
+    if unmatched_ratio > MAX_UNMATCHED_RATIO or mean_distance > MAX_TRAINING_MEAN_DISTANCE:
+        indices, palette = read_palette(rgb)
+        if palette['guessed']:
+            warnings.append('처음 보는 색 체계라 배경 · 정상 · 결함 색을 추정해서 읽었습니다. '
+                            '추정이 틀릴 수 있어 사람 검토로 보냅니다')
+        else:
+            warnings.append(f"학습과 다른 색 체계({palette['name']})를 학습 색으로 바꿔 읽었습니다")
 
     wafer_map = crop_to_content(indices)
     info = {
@@ -105,8 +215,9 @@ def image_to_wafer_map(data: bytes) -> tuple[np.ndarray, dict]:
         'cropped_size': [int(wafer_map.shape[1]), int(wafer_map.shape[0])],
         'unmatched_ratio': round(unmatched_ratio, 6),
         'mean_snap_distance': round(mean_distance, 3),
+        'palette': palette,
         'downsampled': False,
-        'warnings': [],
+        'warnings': warnings,
     }
 
     if max(wafer_map.shape) > STORE_LIMIT:

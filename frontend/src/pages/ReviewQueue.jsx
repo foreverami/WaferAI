@@ -15,11 +15,14 @@ export default function ReviewQueue() {
   const [selected, setSelected] = useState(null)
   const [filter, setFilter] = useState('')
 
+  // 효과 안에서 상태를 동기적으로 바꾸지 않는다. 오류 초기화도 응답이 온 뒤에 한다.
   const load = useCallback(() => {
-    setError(null)
     api
       .records({ reviewOnly: true, limit: 200 })
-      .then(setRows)
+      .then((list) => {
+        setError(null)
+        setRows(list)
+      })
       .catch((caught) => setError(caught.detail || '대기열을 불러오지 못했습니다'))
   }, [])
 
@@ -33,11 +36,20 @@ export default function ReviewQueue() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h2 className="text-xl font-semibold">리뷰 대기열</h2>
-        <p className="text-sm text-muted">
-          AI 확신도가 임계값에 못 미쳐 엔지니어 확인이 필요한 건입니다.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold">리뷰 대기열</h2>
+          <p className="text-sm text-muted">
+            AI 확신도가 기준에 못 미쳤거나, 웨이퍼 맵처럼 생기지 않아 엔지니어 확인이 필요한 건입니다.
+          </p>
+        </div>
+        <a
+          href={api.exportUrl({ reviewOnly: true })}
+          download
+          className="rounded-lg border border-line px-3 py-2 text-sm text-muted transition-colors hover:border-brand hover:text-ink"
+        >
+          대기열 CSV
+        </a>
       </div>
 
       <ErrorNote onRetry={load}>{error}</ErrorNote>
@@ -128,6 +140,7 @@ export default function ReviewQueue() {
 
       {selected && (
         <WaferDetail
+          key={selected}
           waferId={selected}
           onClose={() => setSelected(null)}
           // 검토가 끝나면 대기열에서 빠지므로 목록을 다시 읽는다.

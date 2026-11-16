@@ -125,9 +125,26 @@ def get_auth(request: Request) -> AuthContext:
 
 
 def get_session(request: Request):
-    from waferai.db import session_scope
+    """요청 하나에 세션 하나. 끝나면(성공이든 실패든) 쌓인 감사 기록을 같은 연결로 쓴다.
 
-    yield from session_scope(request.app.state.session_factory)
+    감사 기록을 다른 연결로 쓰면 SQLite 는 이 세션의 쓰기 잠금에 막히고, 이 세션의 트랜잭션에
+    넣으면 실패한 요청(로그인 실패)의 기록이 롤백과 함께 사라진다. 그래서 커밋/롤백이 끝난 뒤
+    같은 세션으로 따로 커밋한다.
+    """
+    from waferai import audit
+
+    session = request.app.state.session_factory()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        try:
+            audit.flush_pending(request, session)
+        finally:
+            session.close()
 
 
 def current_user(request: Request, auth: AuthContext = Depends(get_auth),

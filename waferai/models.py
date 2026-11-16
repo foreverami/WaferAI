@@ -110,6 +110,25 @@ class RevokedToken(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
 
+class AuditEvent(Base):
+    """보안 감사 기록 — 로그인 성공 · 실패 · 잠금, 승인, 임시 비밀번호 발급 등.
+
+    서버 로그에도 같은 줄이 남지만 로그는 컨테이너를 다시 만들면 사라지고 관리자가 화면에서
+    볼 수 없다. 그래서 DB 에도 쌓는다. 비밀번호와 토큰은 절대 넣지 않는다(waferai.audit).
+    employee_id 는 FK 로 묶지 않는다 — 없는 사번으로 로그인을 시도한 기록도 남아야 한다.
+    """
+
+    __tablename__ = 'audit_events'
+
+    event_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    event: Mapped[str] = mapped_column(String(40), index=True)
+    employee_id: Mapped[str | None] = mapped_column(String(40), default=None, index=True)
+    actor: Mapped[str | None] = mapped_column(String(40), default=None)
+    ip: Mapped[str | None] = mapped_column(String(64), default=None)
+    detail: Mapped[dict | None] = mapped_column(JSON, default=None)
+
+
 class AiModel(Base):
     """배포된 모델 버전. 어느 가중치가 어떤 예측을 냈는지 추적한다."""
 

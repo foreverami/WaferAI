@@ -147,17 +147,17 @@ jobs:
         working-directory: deploy
         run: sh preflight.sh
 
-      - name: 기동 — 세 서비스가 healthy 가 될 때까지
+      - name: 기동 — 네 서비스(db · api · web · backup)가 healthy 가 될 때까지
         working-directory: deploy
         run: |
           docker compose up -d --build
           for i in $(seq 1 60); do
             healthy=$(docker inspect --format '{{.State.Health.Status}}' $(docker compose ps -q) | grep -c '^healthy$' || true)
-            [ "$healthy" = "3" ] && break
+            [ "$healthy" = "4" ] && break
             sleep 5
           done
           docker compose ps
-          [ "$healthy" = "3" ]
+          [ "$healthy" = "4" ]
 
       - name: 첫 관리자 생성 — 운영 절차와 같은 명령 (비밀번호는 표준 입력으로)
         working-directory: deploy

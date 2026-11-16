@@ -104,6 +104,22 @@ export const api = {
   resetPassword: (id) => request(`/api/users/${id}/reset-password`, { method: 'POST' }),
   unlockUser: (id) => request(`/api/users/${id}/unlock`, { method: 'POST' }),
 
+  // CSV 는 파일이라 <a href download> 로 받는다
+  exportUrl: ({ reviewOnly = false, days } = {}) => {
+    const params = new URLSearchParams()
+    if (reviewOnly) params.set('review_only', 'true')
+    if (days) params.set('days', String(days))
+    const query = params.toString()
+    return `/api/records/export${query ? `?${query}` : ''}`
+  },
+  trend: (weeks = 12) => request(`/api/stats/trend?weeks=${weeks}`),
+  systemHealth: () => request('/api/system/health'),
+  audit: ({ event = '', limit = 100 } = {}) => {
+    const params = new URLSearchParams({ limit: String(limit) })
+    if (event) params.set('event', event)
+    return request(`/api/audit?${params}`)
+  },
+
   thresholds: () => request('/api/settings/thresholds'),
   saveThresholds: (values) =>
     request('/api/settings/thresholds', { method: 'PUT', body: values }),

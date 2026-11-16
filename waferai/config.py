@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     retrain_threshold: int = 500
     # 로그인 화면의 가입 신청. 신청된 계정은 관리자가 승인해야 로그인할 수 있다. 끄면 관리자만 계정을 만든다.
     allow_signup: bool = True
+    # DB 백업 파일이 쌓이는 폴더 (compose 의 backup 서비스가 쓴다). 관리자 화면이 최근 백업을 보여 준다.
+    backup_dir: str | None = None
 
     @property
     def is_production(self) -> bool:

@@ -48,7 +48,24 @@ def wafer_png(size: int = 224) -> bytes:
     return encode_png(render_wafer_map(wafer_map, size))
 
 
-SYNTHETIC_MAP = b'[[0,1,0],[1,2,1],[0,1,0]]'
+def _synthetic_wafer() -> bytes:
+    """원형 웨이퍼(다이 약 800개) 가운데에 작은 결함 덩어리. 입력 감지(waferai.ood)를 통과하는 모양이다.
+
+    예전엔 3x3 배열을 썼는데, 웨이퍼처럼 생기지 않은 입력을 '판정 불가' 로 보내게 되면서
+    모든 업로드가 그 경로로 빠졌다. 판정 경로를 시험하려면 웨이퍼 모양이어야 한다.
+    """
+    import json
+
+    r = 16
+    yy, xx = np.indices((2 * r + 1, 2 * r + 1))
+    wafer = (((yy - r) ** 2 + (xx - r) ** 2) <= r * r).astype(int)
+    wafer[r - 3:r + 3, r - 3:r + 3][wafer[r - 3:r + 3, r - 3:r + 3] > 0] = 2
+    return json.dumps(wafer.tolist()).encode()
+
+
+SYNTHETIC_MAP = _synthetic_wafer()
+#: 웨이퍼 모양이 아닌 입력 — '판정 불가(OUT_OF_SCOPE)' 경로를 시험한다
+NOT_A_WAFER = b'[[0,1,0],[1,2,1],[0,1,0]]'
 
 
 @unittest.skipUnless(CHECKPOINT.is_file(), '체크포인트가 없습니다')

@@ -67,17 +67,53 @@ class RoundTripTests(unittest.TestCase):
         self.assertLess(info['unmatched_ratio'], 0.02)
 
 
-class RejectionTests(unittest.TestCase):
-    def test_foreign_palette_rejected(self):
-        """다른 색 체계를 조용히 잘못 해석하지 않고 거부해야 한다."""
+def paint(wafer_map, palette):
+    rgb = np.zeros((*wafer_map.shape, 3), dtype=np.uint8)
+    for value, color in palette.items():
+        rgb[wafer_map == value] = color
+    return rgb
+
+
+class PaletteTests(unittest.TestCase):
+    """학습 색이 아닌 3색 이미지 — 알려진 색상표는 그대로, 처음 보는 색은 추정(검토 강제)."""
+
+    def test_known_palettes_restore_exactly(self):
         wafer_map = circular_wafer(45, 48)
-        for palette in ({0: (0, 0, 0), 1: (128, 128, 128), 2: (255, 255, 255)},
-                        {0: (0, 0, 0), 1: (0, 0, 255), 2: (255, 0, 0)}):
-            rgb = np.zeros((*wafer_map.shape, 3), dtype=np.uint8)
-            for value, color in palette.items():
-                rgb[wafer_map == value] = color
-            with self.assertRaises(UnsupportedImage):
-                image_to_wafer_map(encode_png(rgb))
+        for name, palette in (('viridis', {0: (68, 1, 84), 1: (33, 145, 140), 2: (253, 231, 37)}),
+                              ('gray', {0: (0, 0, 0), 1: (128, 128, 128), 2: (255, 255, 255)}),
+                              # gray 와 같은 세 색을 반대 순서로 쓴다 — 배경 위치로 가려야 한다
+                              ('gray_r', {0: (255, 255, 255), 1: (128, 128, 128), 2: (0, 0, 0)})):
+            restored, info = image_to_wafer_map(encode_png(paint(wafer_map, palette)))
+            self.assertEqual(info['palette'], {'name': name, 'guessed': False,
+                                               'unclustered_ratio': info['palette']['unclustered_ratio']})
+            np.testing.assert_array_equal(restored, wafer_map)
+            self.assertTrue(info['warnings'])
+
+    def test_unknown_three_colors_are_guessed_and_flagged(self):
+        wafer_map = circular_wafer(45, 48)
+        restored, info = image_to_wafer_map(encode_png(
+            paint(wafer_map, {0: (0, 0, 0), 1: (0, 0, 255), 2: (255, 0, 0)})))
+        self.assertTrue(info['palette']['guessed'])
+        np.testing.assert_array_equal(restored, wafer_map)
+
+    def test_ambiguous_defect_share_rejected(self):
+        """결함이 다이의 절반 가까이면 어느 색이 결함인지 추정할 수 없다 — 거부한다."""
+        wafer_map = circular_wafer(45, 48, defect='none')
+        dies = np.argwhere(wafer_map > 0)
+        half = dies[: len(dies) // 2]
+        wafer_map[half[:, 0], half[:, 1]] = 2
+        with self.assertRaises(UnsupportedImage):
+            image_to_wafer_map(encode_png(paint(wafer_map, {0: (0, 0, 0), 1: (0, 0, 255), 2: (255, 0, 0)})))
+
+    def test_photo_like_image_rejected(self):
+        """세 색으로 설명되지 않는 이미지(사진, 그라데이션)는 거부한다."""
+        rng = np.random.default_rng(0)
+        noise = rng.integers(0, 256, size=(96, 96, 3), dtype=np.uint8)
+        with self.assertRaises(UnsupportedImage):
+            image_to_wafer_map(encode_png(noise))
+
+
+class RejectionTests(unittest.TestCase):
 
     def test_blank_image_rejected(self):
         with self.assertRaises(UnsupportedImage):

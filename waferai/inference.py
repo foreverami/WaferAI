@@ -19,7 +19,9 @@ from pathlib import Path
 import numpy as np
 
 from waferai.backends import CLASSES, MODEL_NAME, PredictorBackend, build_backend
+from waferai.calibration import apply_temperature
 from waferai.decision import Thresholds, decide
+from waferai.ood import check_shape
 from waferai.preprocess import defect_ratio, to_model_input, validate_map
 
 __all__ = ['CLASSES', 'MODEL_NAME', 'Predictor', 'preprocess', 'load_model', 'predict']
@@ -44,12 +46,30 @@ class Predictor:
     def metadata(self) -> dict:
         return {'backend': self.backend.name, **getattr(self.backend, 'metadata', {})}
 
-    def predict(self, wafer_map, thresholds: Thresholds | None = None) -> dict:
+    @property
+    def calibration(self) -> dict:
+        """모델에 실린 보정 정보 (온도 · 클래스별 권장 임계값). 없으면 빈 dict."""
+        return dict(getattr(self.backend, 'metadata', {}).get('calibration') or {})
+
+    @property
+    def temperature(self) -> float | None:
+        return self.calibration.get('temperature')
+
+    def recommended_class_thresholds(self) -> dict | None:
+        return self.calibration.get('class_thresholds')
+
+    def predict(self, wafer_map, thresholds: Thresholds | None = None,
+                force_review: str | None = None) -> dict:
         wm = validate_map(wafer_map)
-        probabilities = self.backend.probabilities(to_model_input(wm))
+        raw = self.backend.probabilities(to_model_input(wm))
+        probabilities = apply_temperature(raw, self.temperature)
         distribution = {name: float(p) for name, p in zip(CLASSES, probabilities)}
-        result = decide(distribution, defect_ratio(wm), thresholds or self.thresholds)
+        shape = check_shape(wm)
+        result = decide(distribution, defect_ratio(wm), thresholds or self.thresholds,
+                        out_of_scope=list(shape.reasons) or None, force_review=force_review)
         result['probabilities'] = distribution
+        result['shape_check'] = shape.as_dict()
+        result['temperature'] = self.temperature
         result['map_size'] = [int(wm.shape[1]), int(wm.shape[0])]
         # 하위 호환 — 기존 응답을 쓰던 화면이 바로 깨지지 않도록 유지한다.
         result['predicted_class'] = result['final_class']

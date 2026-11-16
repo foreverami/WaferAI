@@ -7,10 +7,19 @@
 
 여기서는 그 구간을 없앤 단계 판정으로 통일한다. 위에서부터 순서대로 검사한다.
 
+    ⓪ 웨이퍼 모양이 아님   → AI 1순위,  OUT_OF_SCOPE  (waferai.ood — 사람이 확인)
     ① 밀도 < low_density   → none,      RULE_BASE   (기본 꺼짐 — 아래 참고)
     ② 밀도 > high_density  → Near-full, RULE_BASE   (기본 0.80)
-    ③ 확신도 ≥ confidence  → AI 1순위,  AUTO_PASS
+    ③ 확신도 ≥ 임계값      → AI 1순위,  AUTO_PASS   (임계값은 1순위 클래스별로 다를 수 있다)
     ④ 그 외                → AI 1순위,  REVIEW_NEEDED (엔지니어 확정 전까지 잠정)
+
+색상표를 추정해 읽은 이미지처럼 입력 해석 자체가 불확실하면 force_review 로 ①–③ 의
+무인 경로를 막고 검토로 보낸다.
+
+클래스별 임계값 — 확신도 하나로 모든 클래스를 자르면, 틀리면 가장 비싼 'none'(결함을
+정상으로 내보냄)과 틀려도 유형만 어긋나는 결함 클래스가 같은 기준을 쓴다. 보정된
+확률(temperature scaling) 위에서 클래스마다 기준을 따로 맞춘 값을 모델이 함께 싣고
+다닌다(scripts/calibrate.py). 설정에서 끄면 단일 임계값으로 돌아간다.
 
 애초에 ①②를 AI 앞에 둔 것은 "결함이 거의 없거나 거의 전부인 웨이퍼는 픽셀 통계가
 AI 보다 믿을 만하다"는 가정이었다. 실제 데이터로 재 보니 ①에서는 그 가정이 틀렸고,
@@ -35,6 +44,7 @@ class DecisionPath(str, Enum):
     RULE_BASE_NEAR_FULL = 'RULE_BASE_NEAR_FULL'  # 보라 — 밀도가 높아 Near-full 강제
     AUTO_PASS = 'AUTO_PASS'                      # 초록 — AI 확신도 충족
     REVIEW_NEEDED = 'REVIEW_NEEDED'              # 빨강 — 엔지니어 검토 대기
+    OUT_OF_SCOPE = 'OUT_OF_SCOPE'                # 회색 — 웨이퍼 맵처럼 생기지 않음, 확인 필요
 
 
 @dataclass(frozen=True)
@@ -63,6 +73,8 @@ class Thresholds:
     low_density: float | None = None
     high_density: float | None = 0.80
     confidence: float = 0.80
+    #: 1순위 클래스별 확신도 임계값. 없는 클래스는 confidence 를 쓴다.
+    class_confidence: dict | None = None
 
     def __post_init__(self) -> None:
         for name in ('low_density', 'high_density', 'confidence'):
@@ -71,20 +83,32 @@ class Thresholds:
                 continue
             if not 0.0 <= value <= 1.0:
                 raise ValueError(f'{name} 은 0.0~1.0 이어야 합니다 (현재 {value})')
+        for name, value in (self.class_confidence or {}).items():
+            if not 0.0 <= float(value) <= 1.0:
+                raise ValueError(f'{name} 클래스 임계값은 0.0~1.0 이어야 합니다 (현재 {value})')
         if self.low_density is not None and self.high_density is not None \
                 and self.low_density >= self.high_density:
             raise ValueError('low_density 는 high_density 보다 작아야 합니다')
+
+    def confidence_for(self, class_name: str) -> float:
+        if self.class_confidence and class_name in self.class_confidence:
+            return float(self.class_confidence[class_name])
+        return self.confidence
 
     def as_dict(self) -> dict:
         return asdict(self)
 
 
 def decide(probabilities: dict[str, float], defect_ratio: float,
-           thresholds: Thresholds | None = None) -> dict:
+           thresholds: Thresholds | None = None, *,
+           out_of_scope: list[str] | None = None,
+           force_review: str | None = None) -> dict:
     """확률 분포와 결함 밀도로 최종 클래스와 처리 경로를 정한다.
 
     `probabilities` 는 클래스명 → 확률. `defect_ratio` 는 패딩 전 원본 맵에서
     배경을 제외하고 센 결함 비율(`preprocess.defect_ratio`).
+    `out_of_scope` 는 입력이 웨이퍼 맵처럼 생기지 않은 이유들(있으면 ⓪).
+    `force_review` 는 무인 경로를 막고 검토로 보내는 이유(입력 해석이 불확실할 때).
     """
     if not probabilities:
         raise ValueError('확률 분포가 비어 있습니다')
@@ -94,19 +118,31 @@ def decide(probabilities: dict[str, float], defect_ratio: float,
     top1 = {'class': ranked[0][0], 'confidence': float(ranked[0][1])}
     top2 = {'class': ranked[1][0], 'confidence': float(ranked[1][1])} if len(ranked) > 1 else None
 
-    if thresholds.low_density is not None and defect_ratio < thresholds.low_density:
+    applied = thresholds.confidence_for(top1['class'])
+    reasons: list[str] = []
+    if out_of_scope:
+        final_class, path = top1['class'], DecisionPath.OUT_OF_SCOPE
+        reasons = list(out_of_scope)
+    elif thresholds.low_density is not None and defect_ratio < thresholds.low_density:
         final_class, path = CLASS_NONE, DecisionPath.RULE_BASE_NONE
     elif thresholds.high_density is not None and defect_ratio > thresholds.high_density:
         final_class, path = CLASS_NEAR_FULL, DecisionPath.RULE_BASE_NEAR_FULL
-    elif top1['confidence'] >= thresholds.confidence:
+    elif top1['confidence'] >= applied:
         final_class, path = top1['class'], DecisionPath.AUTO_PASS
     else:
         final_class, path = top1['class'], DecisionPath.REVIEW_NEEDED
 
+    if force_review and path in (DecisionPath.AUTO_PASS, DecisionPath.RULE_BASE_NONE,
+                                 DecisionPath.RULE_BASE_NEAR_FULL):
+        final_class, path = top1['class'], DecisionPath.REVIEW_NEEDED
+        reasons = [force_review]
+
     return {
         'final_class': final_class,
         'decision_path': path.value,
-        'requires_human_review': path is DecisionPath.REVIEW_NEEDED,
+        'requires_human_review': path in (DecisionPath.REVIEW_NEEDED, DecisionPath.OUT_OF_SCOPE),
+        'review_reasons': reasons,
+        'applied_confidence': applied,
         'rule_base_applied': path in (DecisionPath.RULE_BASE_NONE,
                                       DecisionPath.RULE_BASE_NEAR_FULL),
         'ai_top1': top1,

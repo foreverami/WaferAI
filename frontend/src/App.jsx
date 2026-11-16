@@ -1,6 +1,6 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 
-import { useAuth } from './auth'
+import { useAuth } from './authContext'
 import Layout from './components/Layout'
 import { Spinner } from './components/ui'
 import Account from './pages/Account'

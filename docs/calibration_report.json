@@ -1,0 +1,764 @@
+{
+  "calibration": {
+    "temperature": 0.635,
+    "class_thresholds": {
+      "Center": 0.98,
+      "Donut": 0.99,
+      "Edge-Loc": 0.98,
+      "Edge-Ring": 0.98,
+      "Loc": 0.98,
+      "Near-full": 0.59,
+      "Random": 0.98,
+      "Scratch": 0.98,
+      "none": 0.98
+    },
+    "fitted_on": "val",
+    "split_id": "6685ab33cec9096d",
+    "objective": {
+      "missed_defect_weight": 10.0,
+      "review_cost": 0.2
+    },
+    "ece": {
+      "val_before": 0.0841,
+      "val_after": 0.0063,
+      "test_before": 0.0835,
+      "test_after": 0.0067
+    },
+    "test_effect": {
+      "before": {
+        "n": 17504,
+        "paths": {
+          "AUTO_PASS": 16865,
+          "RULE_BASE_NEAR_FULL": 12,
+          "REVIEW_NEEDED": 627,
+          "OUT_OF_SCOPE": 0
+        },
+        "unattended_rate": 0.9642,
+        "unattended_accuracy": 0.9923,
+        "review_rate": 0.0358,
+        "review": 627,
+        "escaped": 130,
+        "escaped_rate": 0.0074,
+        "missed_defect": 19,
+        "missed_by_class": {
+          "Center": 3,
+          "Edge-Loc": 8,
+          "Loc": 5,
+          "Scratch": 3
+        },
+        "wrong_type": 40,
+        "false_alarm": 71,
+        "review_ai_correct": 0.5774
+      },
+      "calibrated_same_review_global": {
+        "n": 17504,
+        "paths": {
+          "AUTO_PASS": 16487,
+          "RULE_BASE_NEAR_FULL": 12,
+          "REVIEW_NEEDED": 1005,
+          "OUT_OF_SCOPE": 0
+        },
+        "unattended_rate": 0.9426,
+        "unattended_accuracy": 0.996,
+        "review_rate": 0.0574,
+        "review": 1005,
+        "escaped": 66,
+        "escaped_rate": 0.0038,
+        "missed_defect": 10,
+        "missed_by_class": {
+          "Center": 2,
+          "Edge-Loc": 4,
+          "Loc": 1,
+          "Scratch": 3
+        },
+        "wrong_type": 25,
+        "false_alarm": 31,
+        "review_ai_correct": 0.6726
+      },
+      "after": {
+        "n": 17504,
+        "paths": {
+          "AUTO_PASS": 16480,
+          "RULE_BASE_NEAR_FULL": 12,
+          "REVIEW_NEEDED": 1008,
+          "OUT_OF_SCOPE": 4
+        },
+        "unattended_rate": 0.9422,
+        "unattended_accuracy": 0.996,
+        "review_rate": 0.0578,
+        "review": 1012,
+        "escaped": 66,
+        "escaped_rate": 0.0038,
+        "missed_defect": 10,
+        "missed_by_class": {
+          "Center": 2,
+          "Edge-Loc": 4,
+          "Loc": 1,
+          "Scratch": 3
+        },
+        "wrong_type": 25,
+        "false_alarm": 31,
+        "review_ai_correct": 0.6749
+      }
+    },
+    "created_at": "2026-11-16T07:13:53+00:00"
+  },
+  "same_review_global_threshold": 0.98,
+  "effect": {
+    "before": {
+      "natural": {
+        "n": 17504,
+        "paths": {
+          "AUTO_PASS": 16865,
+          "RULE_BASE_NEAR_FULL": 12,
+          "REVIEW_NEEDED": 627,
+          "OUT_OF_SCOPE": 0
+        },
+        "unattended_rate": 0.9642,
+        "unattended_accuracy": 0.9923,
+        "review_rate": 0.0358,
+        "review": 627,
+        "escaped": 130,
+        "escaped_rate": 0.0074,
+        "missed_defect": 19,
+        "missed_by_class": {
+          "Center": 3,
+          "Edge-Loc": 8,
+          "Loc": 5,
+          "Scratch": 3
+        },
+        "wrong_type": 40,
+        "false_alarm": 71,
+        "review_ai_correct": 0.5774
+      },
+      "balanced": {
+        "n": 4844,
+        "paths": {
+          "AUTO_PASS": 4573,
+          "RULE_BASE_NEAR_FULL": 12,
+          "REVIEW_NEEDED": 259,
+          "OUT_OF_SCOPE": 0
+        },
+        "unattended_rate": 0.9465,
+        "unattended_accuracy": 0.9841,
+        "review_rate": 0.0535,
+        "review": 259,
+        "escaped": 73,
+        "escaped_rate": 0.0151,
+        "missed_defect": 19,
+        "missed_by_class": {
+          "Center": 3,
+          "Edge-Loc": 8,
+          "Loc": 5,
+          "Scratch": 3
+        },
+        "wrong_type": 40,
+        "false_alarm": 14,
+        "review_ai_correct": 0.5792
+      }
+    },
+    "calibrated_same_review_global": {
+      "natural": {
+        "n": 17504,
+        "paths": {
+          "AUTO_PASS": 16487,
+          "RULE_BASE_NEAR_FULL": 12,
+          "REVIEW_NEEDED": 1005,
+          "OUT_OF_SCOPE": 0
+        },
+        "unattended_rate": 0.9426,
+        "unattended_accuracy": 0.996,
+        "review_rate": 0.0574,
+        "review": 1005,
+        "escaped": 66,
+        "escaped_rate": 0.0038,
+        "missed_defect": 10,
+        "missed_by_class": {
+          "Center": 2,
+          "Edge-Loc": 4,
+          "Loc": 1,
+          "Scratch": 3
+        },
+        "wrong_type": 25,
+        "false_alarm": 31,
+        "review_ai_correct": 0.6726
+      },
+      "balanced": {
+        "n": 4844,
+        "paths": {
+          "AUTO_PASS": 4419,
+          "RULE_BASE_NEAR_FULL": 12,
+          "REVIEW_NEEDED": 413,
+          "OUT_OF_SCOPE": 0
+        },
+        "unattended_rate": 0.9147,
+        "unattended_accuracy": 0.9912,
+        "review_rate": 0.0853,
+        "review": 413,
+        "escaped": 39,
+        "escaped_rate": 0.0081,
+        "missed_defect": 10,
+        "missed_by_class": {
+          "Center": 2,
+          "Edge-Loc": 4,
+          "Loc": 1,
+          "Scratch": 3
+        },
+        "wrong_type": 25,
+        "false_alarm": 4,
+        "review_ai_correct": 0.6538
+      }
+    },
+    "after": {
+      "natural": {
+        "n": 17504,
+        "paths": {
+          "AUTO_PASS": 16480,
+          "RULE_BASE_NEAR_FULL": 12,
+          "REVIEW_NEEDED": 1008,
+          "OUT_OF_SCOPE": 4
+        },
+        "unattended_rate": 0.9422,
+        "unattended_accuracy": 0.996,
+        "review_rate": 0.0578,
+        "review": 1012,
+        "escaped": 66,
+        "escaped_rate": 0.0038,
+        "missed_defect": 10,
+        "missed_by_class": {
+          "Center": 2,
+          "Edge-Loc": 4,
+          "Loc": 1,
+          "Scratch": 3
+        },
+        "wrong_type": 25,
+        "false_alarm": 31,
+        "review_ai_correct": 0.6749
+      },
+      "balanced": {
+        "n": 4844,
+        "paths": {
+          "AUTO_PASS": 4413,
+          "RULE_BASE_NEAR_FULL": 12,
+          "REVIEW_NEEDED": 419,
+          "OUT_OF_SCOPE": 0
+        },
+        "unattended_rate": 0.9135,
+        "unattended_accuracy": 0.9912,
+        "review_rate": 0.0865,
+        "review": 419,
+        "escaped": 39,
+        "escaped_rate": 0.0081,
+        "missed_defect": 10,
+        "missed_by_class": {
+          "Center": 2,
+          "Edge-Loc": 4,
+          "Loc": 1,
+          "Scratch": 3
+        },
+        "wrong_type": 25,
+        "false_alarm": 4,
+        "review_ai_correct": 0.6587
+      }
+    }
+  },
+  "ood": {
+    "real_maps": 172950,
+    "real_flagged": 36,
+    "real_flagged_test": 4,
+    "ellipse_iou_percentiles": {
+      "0.05": 0.9047,
+      "0.1": 0.9123,
+      "1": 0.931,
+      "50": 0.9762
+    },
+    "die_fraction_percentiles": {
+      "0.05": 0.7185,
+      "1": 0.7407,
+      "50": 0.7714,
+      "99": 0.7969,
+      "99.95": 0.8076
+    },
+    "synthetic": {
+      "무작위 잡음": {
+        "n": 100,
+        "caught": 100,
+        "auto_pass_without_check": 23
+      },
+      "가득 찬 사각형": {
+        "n": 100,
+        "caught": 100,
+        "auto_pass_without_check": 63
+      },
+      "체크무늬": {
+        "n": 100,
+        "caught": 100,
+        "auto_pass_without_check": 35
+      },
+      "줄무늬": {
+        "n": 100,
+        "caught": 100,
+        "auto_pass_without_check": 2
+      },
+      "사각 웨이퍼": {
+        "n": 100,
+        "caught": 100,
+        "auto_pass_without_check": 91
+      },
+      "아주 작은 웨이퍼": {
+        "n": 100,
+        "caught": 100,
+        "auto_pass_without_check": 54
+      }
+    }
+  },
+  "palettes": {
+    "training": {
+      "n": 400,
+      "restored_exactly": 400,
+      "guessed": 0,
+      "rejected": 0,
+      "wrong_unflagged": 0
+    },
+    "viridis": {
+      "n": 400,
+      "restored_exactly": 400,
+      "guessed": 0,
+      "rejected": 0,
+      "wrong_unflagged": 0
+    },
+    "gray": {
+      "n": 400,
+      "restored_exactly": 400,
+      "guessed": 0,
+      "rejected": 0,
+      "wrong_unflagged": 0
+    },
+    "gray_r": {
+      "n": 400,
+      "restored_exactly": 400,
+      "guessed": 0,
+      "rejected": 0,
+      "wrong_unflagged": 0
+    },
+    "random": {
+      "n": 400,
+      "restored_exactly": 388,
+      "guessed": 396,
+      "rejected": 4,
+      "wrong_unflagged": 0
+    }
+  },
+  "confidence_profile_before": {
+    "n": 17504,
+    "confidence_max": 0.9705,
+    "review_curve": [
+      [
+        0.5,
+        0.0049
+      ],
+      [
+        0.51,
+        0.0059
+      ],
+      [
+        0.52,
+        0.0066
+      ],
+      [
+        0.53,
+        0.0075
+      ],
+      [
+        0.54,
+        0.0083
+      ],
+      [
+        0.55,
+        0.0094
+      ],
+      [
+        0.56,
+        0.01
+      ],
+      [
+        0.57,
+        0.0107
+      ],
+      [
+        0.58,
+        0.0114
+      ],
+      [
+        0.59,
+        0.0121
+      ],
+      [
+        0.6,
+        0.0129
+      ],
+      [
+        0.61,
+        0.0136
+      ],
+      [
+        0.62,
+        0.0146
+      ],
+      [
+        0.63,
+        0.0154
+      ],
+      [
+        0.64,
+        0.0161
+      ],
+      [
+        0.65,
+        0.0165
+      ],
+      [
+        0.66,
+        0.0175
+      ],
+      [
+        0.67,
+        0.0184
+      ],
+      [
+        0.68,
+        0.0193
+      ],
+      [
+        0.69,
+        0.0203
+      ],
+      [
+        0.7,
+        0.0214
+      ],
+      [
+        0.71,
+        0.0227
+      ],
+      [
+        0.72,
+        0.0245
+      ],
+      [
+        0.73,
+        0.0253
+      ],
+      [
+        0.74,
+        0.0263
+      ],
+      [
+        0.75,
+        0.0278
+      ],
+      [
+        0.76,
+        0.0291
+      ],
+      [
+        0.77,
+        0.0307
+      ],
+      [
+        0.78,
+        0.0324
+      ],
+      [
+        0.79,
+        0.034
+      ],
+      [
+        0.8,
+        0.0358
+      ],
+      [
+        0.81,
+        0.0378
+      ],
+      [
+        0.82,
+        0.0403
+      ],
+      [
+        0.83,
+        0.0429
+      ],
+      [
+        0.84,
+        0.0458
+      ],
+      [
+        0.85,
+        0.05
+      ],
+      [
+        0.86,
+        0.054
+      ],
+      [
+        0.87,
+        0.0601
+      ],
+      [
+        0.88,
+        0.069
+      ],
+      [
+        0.89,
+        0.082
+      ],
+      [
+        0.9,
+        0.1095
+      ],
+      [
+        0.91,
+        0.356
+      ],
+      [
+        0.92,
+        0.9868
+      ],
+      [
+        0.93,
+        0.9969
+      ],
+      [
+        0.94,
+        0.9995
+      ],
+      [
+        0.95,
+        0.9999
+      ],
+      [
+        0.96,
+        0.9999
+      ],
+      [
+        0.97,
+        0.9999
+      ],
+      [
+        0.98,
+        1.0
+      ],
+      [
+        0.99,
+        1.0
+      ]
+    ]
+  },
+  "confidence_profile_after": {
+    "n": 17504,
+    "confidence_max": 0.9982,
+    "review_curve": [
+      [
+        0.5,
+        0.001
+      ],
+      [
+        0.51,
+        0.0014
+      ],
+      [
+        0.52,
+        0.0017
+      ],
+      [
+        0.53,
+        0.0022
+      ],
+      [
+        0.54,
+        0.0028
+      ],
+      [
+        0.55,
+        0.0034
+      ],
+      [
+        0.56,
+        0.0037
+      ],
+      [
+        0.57,
+        0.0043
+      ],
+      [
+        0.58,
+        0.0048
+      ],
+      [
+        0.59,
+        0.005
+      ],
+      [
+        0.6,
+        0.0053
+      ],
+      [
+        0.61,
+        0.0061
+      ],
+      [
+        0.62,
+        0.0067
+      ],
+      [
+        0.63,
+        0.0071
+      ],
+      [
+        0.64,
+        0.0076
+      ],
+      [
+        0.65,
+        0.0082
+      ],
+      [
+        0.66,
+        0.0087
+      ],
+      [
+        0.67,
+        0.0094
+      ],
+      [
+        0.68,
+        0.0098
+      ],
+      [
+        0.69,
+        0.0103
+      ],
+      [
+        0.7,
+        0.0109
+      ],
+      [
+        0.71,
+        0.0112
+      ],
+      [
+        0.72,
+        0.0118
+      ],
+      [
+        0.73,
+        0.0121
+      ],
+      [
+        0.74,
+        0.0126
+      ],
+      [
+        0.75,
+        0.0131
+      ],
+      [
+        0.76,
+        0.0137
+      ],
+      [
+        0.77,
+        0.0142
+      ],
+      [
+        0.78,
+        0.015
+      ],
+      [
+        0.79,
+        0.0155
+      ],
+      [
+        0.8,
+        0.0162
+      ],
+      [
+        0.81,
+        0.0169
+      ],
+      [
+        0.82,
+        0.0178
+      ],
+      [
+        0.83,
+        0.0183
+      ],
+      [
+        0.84,
+        0.019
+      ],
+      [
+        0.85,
+        0.0207
+      ],
+      [
+        0.86,
+        0.0214
+      ],
+      [
+        0.87,
+        0.0226
+      ],
+      [
+        0.88,
+        0.0237
+      ],
+      [
+        0.89,
+        0.0246
+      ],
+      [
+        0.9,
+        0.0259
+      ],
+      [
+        0.91,
+        0.028
+      ],
+      [
+        0.92,
+        0.0297
+      ],
+      [
+        0.93,
+        0.0316
+      ],
+      [
+        0.94,
+        0.0336
+      ],
+      [
+        0.95,
+        0.0362
+      ],
+      [
+        0.96,
+        0.0411
+      ],
+      [
+        0.97,
+        0.0469
+      ],
+      [
+        0.98,
+        0.0574
+      ],
+      [
+        0.99,
+        0.1047
+      ]
+    ]
+  }
+}

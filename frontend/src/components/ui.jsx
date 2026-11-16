@@ -10,6 +10,8 @@ const PATH_STYLE = {
     className: 'bg-brand/15 text-brand border-brand/40',
   },
   REVIEW_NEEDED: { label: '검토 필요', className: 'bg-danger/15 text-danger border-danger/40' },
+  // 웨이퍼 맵처럼 생기지 않은 입력 — 판정하지 않고 사람에게 넘긴다
+  OUT_OF_SCOPE: { label: '판정 불가 · 확인', className: 'bg-warn/15 text-warn border-warn/40' },
 }
 
 export function DecisionBadge({ path }) {

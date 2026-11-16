@@ -1,4 +1,4 @@
-# WaferAI 배포 구성 — db(PostgreSQL) · api(FastAPI) · web(Nginx)
+# WaferAI 배포 구성 — db(PostgreSQL) · api(FastAPI) · web(Nginx) · backup(자동 DB 백업)
 #
 #   cd deploy
 #   cp .env.example .env        # 값을 채운다
@@ -51,11 +51,14 @@ services:
       WAFERAI_SECRET_KEY: ${WAFERAI_SECRET_KEY:?deploy/.env 에 WAFERAI_SECRET_KEY 를 넣으세요}
       WAFERAI_COOKIE_SECURE: ${WAFERAI_COOKIE_SECURE:-true}
       WAFERAI_BACKEND: ${WAFERAI_BACKEND:-auto}
+      WAFERAI_BACKUP_DIR: /app/backups
     volumes:
       # 가중치는 이미지에 넣지 않고 읽기 전용으로 붙인다.
       - ../models:/app/models:ro
       # 히트맵은 지연 생성 결과라 지워져도 다시 만들어지지만, 재기동마다 다시 만들면 느리다.
       - heatmaps:/app/data/heatmaps
+      # 관리자 화면(모델 관리 › 서버 상태)이 마지막 백업 시각을 보여 주도록 읽기 전용으로 붙인다.
+      - ./backups:/app/backups:ro
     healthcheck:
       # slim 이미지에는 curl 이 없어 파이썬으로 확인한다.
       test: ["CMD", "python", "-c",
@@ -87,6 +90,33 @@ services:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
       interval: 10s
       timeout: 3s
+      retries: 3
+    logging: *logging
+
+  backup:
+    # 매일 DB 를 덤프하고 최근 14개만 남긴다. 서버에 cron 을 따로 걸 필요가 없다.
+    # db 와 같은 이미지라 pg_dump 버전이 서버와 맞는다.
+    image: postgres:16-alpine
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: waferai
+      PGDATABASE: waferai
+      PGPASSWORD: ${POSTGRES_PASSWORD:?deploy/.env 에 POSTGRES_PASSWORD 를 넣으세요}
+      BACKUP_KEEP: ${BACKUP_KEEP:-14}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+    volumes:
+      - ./backups:/backups
+      - ./backup-loop.sh:/backup-loop.sh:ro
+    entrypoint: ["/bin/sh", "/backup-loop.sh"]
+    healthcheck:
+      # 백업할 DB 에 닿는지 본다. 백업 자체의 성공 여부는 관리자 화면의 '마지막 DB 백업' 으로 본다.
+      test: ["CMD-SHELL", "pg_isready -h db -U waferai -d waferai"]
+      interval: 30s
+      timeout: 5s
       retries: 3
     logging: *logging
 
