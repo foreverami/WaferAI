@@ -303,8 +303,8 @@ story.append(table([
 story.append(P('7. 검증과 운영 서버 반영', 'h1'))
 story.append(table([
     ['검증', '결과'],
-    ['자동 테스트 (SQLite)', '262건 통과 (235 → 262, 새 기능 27건)'],
-    ['자동 테스트 (PostgreSQL 16 · GitHub Actions)', 'push 후 CI 결과로 확인 — 보고 메시지에 적음'],
+    ['자동 테스트 (SQLite · PostgreSQL 16)', '263건 통과 — GitHub Actions 양쪽 (235 → 263, 새 기능 28건)'],
+    ['배포 구성 (GitHub Actions, 실제 Docker)', '네 서비스(db · api · web · backup) 모두 healthy'],
     ['프론트엔드 lint · 빌드', '경고 0 · 빌드 성공'],
     ['로컬 미리보기 전 기능 점검', '76 / 76 통과 (운영에서는 화면 CSP 1항목이 더해져 77)'],
     ['브라우저 확인', '대시보드 · 판정 불가 상세 · 설정 · 모델 관리 · 보안 기록 — 5쪽 그림'],
