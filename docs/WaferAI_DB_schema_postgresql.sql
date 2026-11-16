@@ -1,30 +1,17 @@
 -- WaferAI 데이터베이스 스키마 (PostgreSQL 16)
--- 마이그레이션 head 8c41e07d2a95 기준 최종 스키마 · 2026-10-13 생성
+-- 마이그레이션 head c4e8a1b3d5f7 기준 최종 스키마 · 2026-11-17 생성 · 테이블 8개
 --
 -- 빈 DB 에 이 파일을 실행하면 `alembic upgrade head` 로 만든 DB 와 같은 스키마가 되고,
 -- alembic_version 도 head 로 기록되어 이후 마이그레이션을 그대로 이어 적용할 수 있다.
 --     psql -v ON_ERROR_STOP=1 -d <DB> -f WaferAI_DB_schema_postgresql.sql
 -- 운영 서버는 이 파일이 아니라 마이그레이션으로 스키마를 만든다 (deploy/entrypoint.sh).
+-- 다시 만들기: python3 -m scripts.export_schema_sql
 
 BEGIN;
 
 CREATE TABLE alembic_version (
     version_num VARCHAR(32) NOT NULL,
     CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
-);
-
-CREATE TABLE users (
-    employee_id VARCHAR(20) NOT NULL,
-    name VARCHAR(50) NOT NULL,
-    email VARCHAR(120) NOT NULL,
-    department VARCHAR(50),
-    role VARCHAR(20) NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    password_changed_at TIMESTAMP WITH TIME ZONE NOT NULL,
-    is_active BOOLEAN NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-    PRIMARY KEY (employee_id),
-    UNIQUE (email)
 );
 
 CREATE TABLE ai_model (
@@ -35,12 +22,74 @@ CREATE TABLE ai_model (
     backend VARCHAR(20) NOT NULL,
     val_accuracy FLOAT,
     epoch INTEGER,
-    is_active BOOLEAN NOT NULL,
-    deployed_at TIMESTAMP WITH TIME ZONE NOT NULL,
     split_id VARCHAR(32),
     test_metrics JSON,
+    is_active BOOLEAN NOT NULL,
+    deployed_at TIMESTAMP WITH TIME ZONE NOT NULL,
     PRIMARY KEY (model_id),
     UNIQUE (file_sha256)
+);
+
+CREATE TABLE audit_events (
+    event_id SERIAL NOT NULL,
+    at TIMESTAMP WITH TIME ZONE NOT NULL,
+    event VARCHAR(40) NOT NULL,
+    employee_id VARCHAR(40),
+    actor VARCHAR(40),
+    ip VARCHAR(64),
+    detail JSON,
+    PRIMARY KEY (event_id)
+);
+
+CREATE INDEX ix_audit_events_at ON audit_events (at);
+
+CREATE INDEX ix_audit_events_employee_id ON audit_events (employee_id);
+
+CREATE INDEX ix_audit_events_event ON audit_events (event);
+
+CREATE TABLE revoked_tokens (
+    jti VARCHAR(64) NOT NULL,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    PRIMARY KEY (jti)
+);
+
+CREATE INDEX ix_revoked_tokens_expires_at ON revoked_tokens (expires_at);
+
+CREATE TABLE users (
+    employee_id VARCHAR(20) NOT NULL,
+    name VARCHAR(50) NOT NULL,
+    email VARCHAR(120) NOT NULL,
+    department VARCHAR(50),
+    role VARCHAR(20) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    password_changed_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    is_active BOOLEAN NOT NULL,
+    approved_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    token_version INTEGER DEFAULT '0' NOT NULL,
+    failed_logins INTEGER DEFAULT '0' NOT NULL,
+    locked_until TIMESTAMP WITH TIME ZONE,
+    must_change_password BOOLEAN DEFAULT '0' NOT NULL,
+    PRIMARY KEY (employee_id),
+    UNIQUE (email)
+);
+
+CREATE TABLE retrain_job (
+    job_id VARCHAR(60) NOT NULL,
+    model_type VARCHAR(60) NOT NULL,
+    triggered_by VARCHAR(50) NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    review_cutoff TIMESTAMP WITH TIME ZONE NOT NULL,
+    new_reviews INTEGER NOT NULL,
+    base_model_id INTEGER,
+    result_model_id INTEGER,
+    note TEXT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    started_at TIMESTAMP WITH TIME ZONE,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    PRIMARY KEY (job_id),
+    FOREIGN KEY(base_model_id) REFERENCES ai_model (model_id),
+    FOREIGN KEY(result_model_id) REFERENCES ai_model (model_id)
 );
 
 CREATE TABLE settings (
@@ -85,24 +134,6 @@ CREATE TABLE review_result (
     FOREIGN KEY(reviewer_id) REFERENCES users (employee_id)
 );
 
-CREATE TABLE retrain_job (
-    job_id VARCHAR(60) NOT NULL,
-    model_type VARCHAR(60) NOT NULL,
-    triggered_by VARCHAR(50) NOT NULL,
-    status VARCHAR(20) NOT NULL,
-    review_cutoff TIMESTAMP WITH TIME ZONE NOT NULL,
-    new_reviews INTEGER NOT NULL,
-    base_model_id INTEGER,
-    result_model_id INTEGER,
-    note TEXT,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-    started_at TIMESTAMP WITH TIME ZONE,
-    completed_at TIMESTAMP WITH TIME ZONE,
-    PRIMARY KEY (job_id),
-    FOREIGN KEY(base_model_id) REFERENCES ai_model (model_id),
-    FOREIGN KEY(result_model_id) REFERENCES ai_model (model_id)
-);
-
-INSERT INTO alembic_version (version_num) VALUES ('8c41e07d2a95');
+INSERT INTO alembic_version (version_num) VALUES ('c4e8a1b3d5f7');
 
 COMMIT;
