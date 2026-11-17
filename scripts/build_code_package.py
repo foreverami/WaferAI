@@ -143,6 +143,22 @@ MANUAL = {
     'docs/calibration_report.json': '판정 측정 원본 — 보정 · 판정 기준 · 입력 감지 · 색상표',
     'docs/WaferAI_DB_schema_postgresql.sql': 'DB 스키마 SQL (마이그레이션 head 기준)',
     'samples/manifest.json': '점검용 실제 웨이퍼 12벌의 정답 · 기대 경로',
+    'alembic/README': 'Alembic 기본 안내',
+    'alembic/script.py.mako': '새 마이그레이션 파일 틀',
+    'frontend/.gitignore': '화면 쪽 git 제외 목록 (node_modules · dist)',
+    'frontend/README.md': 'Vite 기본 안내',
+    'frontend/public/favicon.svg': '브라우저 탭 아이콘',
+    'frontend/public/icons.svg': '화면 아이콘 모음',
+    'waferai/static/index.html': 'API 서버 단독 실행 때 / 에 보이는 안내 쪽',
+    'docs/WaferAI_사용설명서.md': '사용 설명서 — 역할별 · 화면별 사용법',
+    'docs/WaferAI_발표대본_1105.md': '11/05 중간 발표 대본',
+    'docs/WaferAI_최종결과물_정리.pdf': '최종 결과물 정리본 (11/17)',
+    'docs/WaferAI_개선보고_1116.pdf': '성능 개선 보고 (11/16)',
+    'docs/WaferAI_발표_1105.pdf': '11/05 발표 배포 자료',
+    'docs/WaferAI_중간발표_1105.pptx': '11/05 중간 발표 슬라이드',
+    'docs/WaferAI_진행보고서.pdf': '10월 진행 보고서',
+    'docs/WaferAI_추가진행보고서_1013.pdf': '10/13 추가 진행 보고서',
+    'docs/figures/gradcam_examples.png': 'Grad-CAM 예시 그림',
 }
 
 SHELL_COMMENT = re.compile(r'^#(?!!)\s?(.*)$')
@@ -151,6 +167,8 @@ SHELL_COMMENT = re.compile(r'^#(?!!)\s?(.*)$')
 def describe(path: str, text: str | None) -> str:
     if path in MANUAL:
         return MANUAL[path]
+    if path.startswith('docs/figures/ui/'):
+        return '화면 캡처 (보고서용)'
     if text is None:
         return ''
     if path.endswith('.py'):
@@ -337,7 +355,7 @@ def build_listing(ref: str, files: list[str], out: Path, meta: dict) -> tuple[in
         story.append(tagged(P(title, 'h1'), 0, title, f's{section_index}'))
         for file_index, path in enumerate(chosen):
             text = read(ref, path)
-            lines = text.rstrip('\n').split('\n')
+            lines = text.rstrip('\n').split('\n') if text.strip() else []
             total_lines += len(lines)
             listed += 1
             key = f's{section_index}f{file_index}'
@@ -368,7 +386,7 @@ def build_listing(ref: str, files: list[str], out: Path, meta: dict) -> tuple[in
 # ── 구성 안내서 ─────────────────────────────────────────────────────────────
 
 def count_lines(text: str | None) -> int:
-    return len(text.rstrip('\n').split('\n')) if text else 0
+    return len(text.rstrip('\n').split('\n')) if text and text.strip() else 0
 
 
 def build_guide(ref: str, files: list[str], out: Path, meta: dict, listing: tuple[int, int]) -> None:
@@ -405,15 +423,17 @@ def build_guide(ref: str, files: list[str], out: Path, meta: dict, listing: tupl
     story.append(P('구조 한눈에', 'h2'))
     tree = [
         'WaferAI/',
-        '├── waferai/            백엔드 — server.py(앱) · routers/(API) · decision.py(판정) · inference.py(추론)',
-        '│                       calibration.py(보정) · ood.py(입력 감지) · image_adapter.py(이미지) · auth.py · models.py',
-        '├── frontend/src/       화면 — pages/(화면) · components/(공통) · api.js(API 호출)',
-        '├── alembic/versions/   DB 마이그레이션 6개',
-        '├── deploy/             compose.yaml · nginx/ · backup-loop.sh · deploy_update.sh · azure_alerts.sh',
-        '├── scripts/            train.py · calibrate.py · acceptance.py · export_onnx.py · promote_model.py …',
-        '├── tests/              자동 테스트 263건',
-        '├── samples/            점검 · 시연용 실제 웨이퍼 파일',
-        '├── docs/               보고서 · 설명서 · 발표 자료 · 측정 결과 · DB 스키마',
+        '├── waferai/           백엔드 — server.py · routers/ (API)',
+        '│                      decision.py (판정) · inference.py (추론) · calibration.py (보정)',
+        '│                      ood.py (입력 감지) · image_adapter.py (이미지) · auth.py · models.py',
+        '├── frontend/src/      화면 — pages/ · components/ · api.js',
+        '├── alembic/versions/  DB 마이그레이션 6개',
+        '├── deploy/            compose.yaml · nginx/ · backup-loop.sh',
+        '│                      deploy_update.sh · azure_alerts.sh',
+        '├── scripts/           train.py · calibrate.py · acceptance.py · export_onnx.py …',
+        '├── tests/             자동 테스트 263건',
+        '├── samples/           점검 · 시연용 실제 웨이퍼 파일',
+        '├── docs/              보고서 · 설명서 · 발표 자료 · 측정 결과 · DB 스키마',
         '└── Dockerfile · requirements.txt · .github/workflows/ci.yml · README.md',
     ]
     story.append(XPreformatted('\n'.join(mixed(line) for line in tree),
