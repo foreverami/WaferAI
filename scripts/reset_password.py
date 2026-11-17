@@ -1,6 +1,6 @@
 """비밀번호 초기화 CLI — 관리자 본인이 잊었을 때 서버에서 쓴다.
 
-    python3 -m scripts.reset_password --employee-id 202104346
+    python3 -m scripts.reset_password --employee-id 사번
 
 다른 사용자의 비밀번호는 관리자가 화면(계정 탭)에서 초기화한다. 이 명령은 그 관리자마저
 비밀번호를 잊었을 때의 마지막 수단이다. 서버에 접속할 수 있는 사람만 쓸 수 있다.
